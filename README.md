@@ -108,6 +108,34 @@ These are the ones worth knowing before you lose an afternoon.
 The manifest is keyed by LaTeX label (`"Fig: <label>"`) and records where each figure came
 from. HTML is written with `include_plotlyjs="directory"` so exports work offline.
 
+## Publishing the document
+
+The `publish` extra installs [`thesis-agent`](https://github.com/c-energie/thesis-agent),
+which turns the document into a queryable corpus, a Notion wiki or a Quarto site:
+
+```bash
+uv sync --extra publish
+export DOCUMENT_REPO=/path/to/my-document
+thesis-agent init      # scaffold the contract into the document repo
+thesis-agent build     # LaTeX -> corpus
+thesis-agent site      # Quarto site;  `sync` for Notion
+```
+
+It lives here rather than in the document repo because this is the Python repo of the
+pair — the document repo goes to Overleaf and stays pure LaTeX. It is a **command**, not a
+code dependency: nothing in `src/` imports it, which is what keeps this package
+installable on its own.
+
+Three things that surprise people:
+
+- **Quarto is a system dependency.** An extra cannot install it — `winget install
+  Posit.Quarto`, or the equivalent for your platform.
+- **Notion needs a token**, which means a credential in the repo where your analysis runs.
+  Use an environment variable; never commit it.
+- **Publishing state lives in the *document* repo**, under `.thesis-agent/` — not here.
+  So a publish driven from this repo writes state into the other one. That is
+  counterintuitive, and losing `notion_manifest.json` duplicates an entire published wiki.
+
 ## Keep the tooling free of your data layer
 
 `PACKAGE_NAME` deliberately depends on nothing private. Add your analysis stack as an

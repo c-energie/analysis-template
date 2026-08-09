@@ -21,13 +21,26 @@ dependencies = [
 notebooks = ["ipykernel>=6.29", "jupyter>=1.1"]
 dev = ["pytest>=8"]
 
+# Publishing the document: corpus build, Notion sync, Quarto site. This is the Python
+# repo of the pair — the document repo goes to Overleaf and must stay pure LaTeX — so the
+# publishing CLI belongs here even though it consumes the *document*. Its ingest and
+# publish paths are stdlib plus httpx, so the extra is cheap.
+#
+# Nothing in src/ imports it: this makes a command available, not a code dependency. That
+# boundary is what keeps this package installable on its own.
+#
+# The chat server is heavier and stays a separate opt-in:  pip install "thesis-agent[app]"
+publish = ["thesis-agent"]
+
 # Your private or project-specific analysis packages go here, so that
 # `uv sync --extra analysis` installs them and a plain install does not.
 # analysis = ["your-analysis-package"]
 
-# Resolve a local checkout instead of a git/PyPI reference (uv only):
+# Resolve a local checkout or a git ref instead of PyPI (uv only). thesis-agent is not on
+# PyPI yet, so uncomment its line to use the `publish` extra:
 # [tool.uv.sources]
 # your-analysis-package = { path = "../your-analysis-package", editable = true }
+# thesis-agent = { git = "https://github.com/c-energie/thesis-agent" }
 
 [project.scripts]
 check-figure-parity = "PACKAGE_NAME.parity:main"
