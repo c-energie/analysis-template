@@ -9,7 +9,7 @@ notebook ─> figure ──┤
                      └─> interactive HTML + manifest ─> wiki / site
 ```
 
-The companion is [`writing-template`](https://github.com/corson94/writing-template), which
+The companion is [`writing-template`](https://github.com/c-energie/writing-template), which
 this repository takes as a build input through `DOCUMENT_REPO`. Neither imports the other:
 the document repo knows nothing about Python, and this package never reads your prose.
 
