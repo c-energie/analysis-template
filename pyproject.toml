@@ -1,0 +1,41 @@
+[project]
+name = "PACKAGE-NAME"
+version = "0.1.0"
+description = "Figure and table tooling for a LaTeX document: one plotly figure produces the committed PNG and an interactive HTML export."
+authors = [{ name = "<<AUTHOR>>" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Deliberately minimal, and deliberately free of any private package: the tooling must
+# stay installable by anyone. Your notebooks will need an analysis stack of their own —
+# add it as an optional extra (see below) rather than a hard dependency, so this package
+# remains usable on its own.
+dependencies = [
+    "plotly>=6.0,<7.0",
+    "kaleido>=1.0,<2.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+notebooks = ["ipykernel>=6.29", "jupyter>=1.1"]
+dev = ["pytest>=8"]
+
+# Your private or project-specific analysis packages go here, so that
+# `uv sync --extra analysis` installs them and a plain install does not.
+# analysis = ["your-analysis-package"]
+
+# Resolve a local checkout instead of a git/PyPI reference (uv only):
+# [tool.uv.sources]
+# your-analysis-package = { path = "../your-analysis-package", editable = true }
+
+[project.scripts]
+check-figure-parity = "PACKAGE_NAME.parity:main"
+init-figures-config = "PACKAGE_NAME.figure_config:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"

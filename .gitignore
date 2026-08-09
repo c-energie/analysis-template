@@ -1,0 +1,26 @@
+# ---- interactive figure exports ----
+# The HTML exports and their manifest. Ignored by default because they are build output,
+# regenerated from the notebooks.
+#
+# Remove these two lines when you have somewhere to publish them from — the manifest is
+# what a publishing agent consumes, and it must be committed if the agent builds from a
+# checkout rather than from a live run.
+/figures_html/
+figures_manifest.json
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ---- editors / os ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

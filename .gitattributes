@@ -1,0 +1,19 @@
+# Notebook outputs: a decision to make deliberately, once.
+#
+# By default git stores whatever is in the .ipynb, which includes every rendered figure
+# and printed table. That has a real upside — GitHub renders notebooks inline, so a reader
+# sees your figures and numbers without your data or your analysis stack — and two real
+# costs: diffs are large and unreadable, and the repository grows on every re-run.
+#
+# It is also a DISCLOSURE decision. Committed outputs publish whatever the notebook
+# printed. If your data is sensitive and your repository is or may become public, strip
+# them:
+#
+#     pip install nbstripout
+#     nbstripout --install --attributes .gitattributes
+#
+# which adds a filter here and clears outputs on commit. If instead you want outputs
+# committed, say so here so the next person knows it was chosen rather than overlooked.
+#
+# This template commits them: the example notebook is meant to be read on GitHub.
+*.ipynb diff=ipynb

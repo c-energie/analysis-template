@@ -1,0 +1,22 @@
+# Which figures and tables a notebook run may write into the document repo.
+#
+# Read by PACKAGE_NAME.figure_config. In short:
+#   * a name not listed here is appended with `default` below, and that value is honoured
+#     immediately -- so with default = true a newly named figure saves on sight and
+#     records itself, and with default = false it records itself as off and waits;
+#   * the two master switches veto a whole kind at once, but never turn an entry on;
+#   * entries are keyed by the artefact stem, so "x.png" and "x" are the same entry.
+#
+# Sections are notebook stems and fill themselves in as notebooks run. Set an entry to
+# false to stop regenerating a figure you have settled on -- that is the point of the
+# file: turning one artefact off should never mean editing a notebook.
+
+default = true
+save_figures = true
+save_tables = true
+
+[example_figure.figures]
+example_scatter = true
+
+[example_figure.tables]
+example_summary = true
