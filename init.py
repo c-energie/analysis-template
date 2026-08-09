@@ -76,9 +76,9 @@ def main():
 
     print(f"\nRewrote {changed} file(s); renamed src/{PACKAGE_TOKEN} -> src/{package}.")
     print("\nNext:")
-    print("  * Point DOCUMENT_REPO at your document repository:")
-    print('        $env:DOCUMENT_REPO = "<...>/my-document"     # PowerShell')
-    print('        export DOCUMENT_REPO=<...>/my-document       # bash')
+    print("  * Point DOC_REPO at your document repository:")
+    print('        $env:DOC_REPO = "<...>/my-document"     # PowerShell')
+    print('        export DOC_REPO=<...>/my-document       # bash')
     print("  * uv sync --extra dev --extra notebooks   (or pip install -e '.[dev,notebooks]')")
     print("  * Run notebooks/example/example_figure.ipynb to prove the wiring, then")
     print("    `check-figure-parity --snapshot` to record the baseline.")

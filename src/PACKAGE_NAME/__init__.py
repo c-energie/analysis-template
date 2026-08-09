@@ -5,7 +5,7 @@ figure is styled consistently without per-notebook setup.
 
     from PACKAGE_NAME import save_document_figure, save_document_table, figure_size
 
-The LaTeX document repo is located via the DOCUMENT_REPO environment variable;
+The LaTeX document repo is located via the DOC_REPO environment variable;
 nothing here hardcodes a path, and nothing here depends on a private package.
 """
 

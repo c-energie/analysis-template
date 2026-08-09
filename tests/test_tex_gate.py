@@ -7,7 +7,7 @@ The append is now gated on a scan of the Chapters tree; these tests pin the beha
 that makes the gate trustworthy enough for `tex` to default to True.
 
 Everything here writes to tmp_path. The assertions against a real document
-repo are read-only and skip when DOCUMENT_REPO is unset.
+repo are read-only and skip when DOC_REPO is unset.
 """
 import os
 from pathlib import Path
@@ -172,8 +172,8 @@ def test_table_snippet_is_appended_once(tmp_path):
 
 # --------------------------------------------------------------- real repo
 
-@pytest.mark.skipif(not os.environ.get("DOCUMENT_REPO"),
-                    reason="DOCUMENT_REPO is not set")
+@pytest.mark.skipif(not os.environ.get("DOC_REPO"),
+                    reason="DOC_REPO is not set")
 def test_against_the_real_document():
     """Read-only sanity check against the actual chapter sources.
 
@@ -182,7 +182,7 @@ def test_against_the_real_document():
     prose — it is the only test that exercises the scan against real LaTeX rather than a
     fixture, and it is worth keeping honest.
     """
-    chapters = Path(os.environ["DOCUMENT_REPO"]) / "Chapters"
+    chapters = Path(os.environ["DOC_REPO"]) / "Chapters"
     example = chapters / "Example"
     if not example.is_dir():
         pytest.skip("no Example chapter; repoint this at a chapter of your own")

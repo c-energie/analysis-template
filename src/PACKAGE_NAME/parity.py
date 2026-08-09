@@ -189,7 +189,7 @@ def check_figures_placed(document_repo, html_dir=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--document-repo", type=Path, default=None,
-                        help="LaTeX document repo root (default: the DOCUMENT_REPO env var)")
+                        help="LaTeX document repo root (default: the DOC_REPO env var)")
     parser.add_argument("--tolerance", type=float, default=0.05,
                         help="Max fractional drift in width/height/aspect (default 0.05)")
     parser.add_argument("--stems", nargs="*", default=None,

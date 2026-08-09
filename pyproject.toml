@@ -15,6 +15,9 @@ dependencies = [
     "plotly>=6.0,<7.0",
     "kaleido>=1.0,<2.0",
     "pandas>=2.0",
+    # DataFrame.to_latex() goes through the Styler, which needs jinja2. Easy to miss:
+    # Jupyter pulls it in, so a table only fails in an environment without notebooks.
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -29,18 +32,18 @@ dev = ["pytest>=8"]
 # Nothing in src/ imports it: this makes a command available, not a code dependency. That
 # boundary is what keeps this package installable on its own.
 #
-# The chat server is heavier and stays a separate opt-in:  pip install "thesis-agent[app]"
-publish = ["thesis-agent"]
+# The chat server is heavier and stays a separate opt-in:  pip install "doc-publish[app]"
+publish = ["doc-publish"]
 
 # Your private or project-specific analysis packages go here, so that
 # `uv sync --extra analysis` installs them and a plain install does not.
 # analysis = ["your-analysis-package"]
 
-# Resolve a local checkout or a git ref instead of PyPI (uv only). thesis-agent is not on
+# Resolve a local checkout or a git ref instead of PyPI (uv only). doc-publish is not on
 # PyPI yet, so uncomment its line to use the `publish` extra:
 # [tool.uv.sources]
 # your-analysis-package = { path = "../your-analysis-package", editable = true }
-# thesis-agent = { git = "https://github.com/c-energie/thesis-agent" }
+# doc-publish = { git = "https://github.com/c-energie/doc-publish" }
 
 [project.scripts]
 check-figure-parity = "PACKAGE_NAME.parity:main"

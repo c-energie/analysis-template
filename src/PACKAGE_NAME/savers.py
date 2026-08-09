@@ -21,7 +21,7 @@ from PACKAGE_NAME.save_table import save_document_table
 def notebook_savers(chapter, notebook, tex=None, section=None, config_path=None):
     """Return (save_fig, save_table) bound to one notebook's chapter.
 
-    chapter is the path under $DOCUMENT_REPO/Chapters, notebook the .ipynb filename (it is
+    chapter is the path under $DOC_REPO/Chapters, notebook the .ipynb filename (it is
     recorded in the figure manifest), and tex names the chapter .tex file that should
     receive a commented reference when an artefact is not referenced yet — required in
     chapters holding several .tex files, which otherwise raise rather than guess. section

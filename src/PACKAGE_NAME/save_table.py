@@ -114,7 +114,7 @@ def save_document_table(df, name, caption=None, label=None, chapters_root=None,
     """Save a DataFrame as a LaTeX table into a per-leaf shared table library file.
 
     The chapter directory is chosen interactively unless chapter is given (a path
-    relative to $DOCUMENT_REPO/Chapters, e.g. "Results/ptg_application"); tex names
+    relative to $DOC_REPO/Chapters, e.g. "Results/ptg_application"); tex names
     the .tex file that receives the commented reference, so unattended notebook runs
     never prompt. The DataFrame is
     rendered with dataframe_to_latex (booktabs, fixed decimals, aligned columns) and wrapped

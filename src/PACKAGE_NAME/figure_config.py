@@ -1,7 +1,7 @@
 """Which figures and tables a notebook run is allowed to write.
 
 A notebook re-run regenerates every artefact it can, which is rarely what you want: most
-runs are exploratory, and writing into `$DOCUMENT_REPO` on each one churns committed PNGs
+runs are exploratory, and writing into `$DOC_REPO` on each one churns committed PNGs
 and the LaTeX tree. The old answer was a `SAVE_FIGURES = False` constant per notebook,
 which is all-or-nothing and has to be flipped by hand in the source.
 

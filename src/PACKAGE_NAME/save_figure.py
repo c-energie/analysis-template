@@ -9,7 +9,7 @@ can never drift:
 - an interactive HTML (same stem) into a local figures directory, plus an entry in
   that directory's figures_manifest.json.
 
-The LaTeX repo is an input, located via the DOCUMENT_REPO environment variable (the
+The LaTeX repo is an input, located via the DOC_REPO environment variable (the
 same convention the publishing agent uses) — this package never hardcodes a user path.
 
 A matplotlib figure keeps the historical PNG-only behaviour and warns that the
@@ -28,7 +28,7 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-DOCUMENT_REPO_ENV = "DOCUMENT_REPO"
+DOC_REPO_ENV = "DOC_REPO"
 HTML_DIR_ENV = "FIGURES_HTML_DIR"
 
 FIGURES_DIRNAME = "Figures"
@@ -43,21 +43,21 @@ ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
 
 
 def document_repo():
-    """Root of the LaTeX document repo, from $DOCUMENT_REPO.
+    """Root of the LaTeX document repo, from $DOC_REPO.
 
     Raises with an actionable message rather than guessing: writing a figure into the
     wrong tree would silently break the document build.
     """
-    value = os.environ.get(DOCUMENT_REPO_ENV)
+    value = os.environ.get(DOC_REPO_ENV)
     if not value:
         raise RuntimeError(
-            f"{DOCUMENT_REPO_ENV} is not set. Point it at the LaTeX document repo root, e.g.\n"
-            f'    $env:{DOCUMENT_REPO_ENV} = "C:\\Users\\<you>\\Documents\\Projects\\<document-repo>"'
+            f"{DOC_REPO_ENV} is not set. Point it at the LaTeX document repo root, e.g.\n"
+            f'    $env:{DOC_REPO_ENV} = "C:\\Users\\<you>\\Documents\\Projects\\<document-repo>"'
         )
     repo = Path(value)
     if not (repo / "Chapters").is_dir():
         raise NotADirectoryError(
-            f"{DOCUMENT_REPO_ENV}={repo} does not look like the document repo "
+            f"{DOC_REPO_ENV}={repo} does not look like the document repo "
             f"(no Chapters/ directory)."
         )
     return repo
@@ -350,7 +350,7 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, chapter=No
     name is the figure file name; if it has no extension, ".png" is assumed. fig may be
     a plotly Figure (preferred) or a matplotlib Figure (legacy; defaults to the current
     matplotlib figure when omitted). The chapter directory is chosen interactively
-    unless chapter is given (a path relative to $DOCUMENT_REPO/Chapters, e.g.
+    unless chapter is given (a path relative to $DOC_REPO/Chapters, e.g.
     "Results/ptg_application"), and the PNG is written to its Figures/ sub-directory —
     same filename and location as always, since the LaTeX and the publishing agent reference it
     by bare name. A commented-out figure block is appended to a .tex file in the
