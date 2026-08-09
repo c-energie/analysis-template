@@ -110,7 +110,7 @@ from. HTML is written with `include_plotlyjs="directory"` so exports work offlin
 
 ## Publishing the document
 
-The `publish` extra installs [`doc-publish`](https://github.com/c-energie/doc-publish),
+The `publish` extra installs [`doc-publish`](https://github.com/corson94/doc-publish),
 which turns the document into a queryable corpus, a Notion wiki or a Quarto site:
 
 ```bash
