@@ -43,7 +43,7 @@ publish = ["doc-publish @ git+https://github.com/c-energie/doc-publish.git"]
 # PyPI yet, so uncomment its line to use the `publish` extra:
 # [tool.uv.sources]
 # your-analysis-package = { path = "../your-analysis-package", editable = true }
-# doc-publish = { git = "https://github.com/corson94/doc-publish" }
+# doc-publish = { git = "https://github.com/c-energie/doc-publish" }
 
 [project.scripts]
 check-figure-parity = "PACKAGE_NAME.parity:main"
