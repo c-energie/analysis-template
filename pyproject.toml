@@ -33,7 +33,7 @@ dev = ["pytest>=8"]
 # boundary is what keeps this package installable on its own.
 #
 # The chat server is heavier and stays a separate opt-in:  pip install "doc-publish[app]"
-publish = ["doc-publish"]
+publish = ["doc-publish @ git+https://github.com/c-energie/doc-publish.git"]
 
 # Your private or project-specific analysis packages go here, so that
 # `uv sync --extra analysis` installs them and a plain install does not.
