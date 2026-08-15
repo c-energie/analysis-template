@@ -49,7 +49,7 @@ MASTER_KEY = {FIGURES: "save_figures", TABLES: "save_tables"}
 DEFAULT_KEY = "default"
 
 _BOOTSTRAP_TEMPLATE = """\
-# Which figures and tables a notebook run may write. See PACKAGE_NAME.figure_config.
+# Which figures and tables a notebook run may write. See doc_analysis.figure_config.
 #
 # A name not listed here is appended with the `{default_key}` value below and that value is
 # honoured immediately. Flip an entry to false to stop that artefact being written; flip a

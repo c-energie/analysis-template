@@ -11,7 +11,7 @@ shipped config uses `default = true`.
 """
 import pytest
 
-from PACKAGE_NAME.figure_config import (FIGURES, TABLES, entry_name, init_config,
+from doc_analysis.figure_config import (FIGURES, TABLES, entry_name, init_config,
                                           is_enabled, load_config)
 
 CONFIG = """\

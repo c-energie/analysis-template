@@ -30,7 +30,7 @@ import struct
 import sys
 from pathlib import Path
 
-from PACKAGE_NAME.save_figure import (
+from doc_analysis.save_figure import (
     CHAPTERS_DIRNAME,
     DEFAULT_HTML_DIR,
     HTML_DIR_ENV,

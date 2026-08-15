@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from PACKAGE_NAME.save_figure import (
+from doc_analysis.save_figure import (
     _append_commented_block,
     _resolve_chapter_dir,
 )

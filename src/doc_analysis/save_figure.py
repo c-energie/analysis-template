@@ -1,19 +1,29 @@
-"""Save document figures: one call writes the LaTeX PNG and (for plotly) a wiki HTML.
+"""Save document figures: one call writes the LaTeX PNG and, for plotly, a wiki HTML.
 
-A plotly figure produces BOTH outputs from the same object, so the PDF and the wiki
-can never drift:
+Which backend you use is read off the figure object you pass — there is no setting to
+keep in step with it, because the object already says which it is.
+
+A **plotly** figure (preferred) produces BOTH outputs from the same object, so the PDF
+and the wiki can never drift:
 
 - a static PNG into the LaTeX repo's chapter Figures/ directory — filename and
   location are never changed by this module, because the LaTeX resolves bare
   filenames via \\graphicspath and the publishing agent indexes them;
-- an interactive HTML (same stem) into a local figures directory, plus an entry in
-  that directory's figures_manifest.json.
+- an interactive HTML (same stem) into a local figures directory.
+
+A **matplotlib** figure writes the PNG only. That is a supported choice, not an
+unfinished migration: you give up the interactive export and nothing else. Downstream
+handles it — the publishing engine's figure emitter falls through to the static PNG
+whenever an entry has no interactive export.
+
+Either way the figure is recorded in that directory's figures_manifest.json, with a
+`backend` field and `interactive: null` for the static-only case. The manifest is the
+record of everything this pipeline writes, which is what `check-figure-parity` reads to
+guard figure sizes and to report which figures the document actually renders — so a
+matplotlib figure is covered by both checks exactly as a plotly one is.
 
 The LaTeX repo is an input, located via the DOC_REPO environment variable (the
 same convention the publishing agent uses) — this package never hardcodes a user path.
-
-A matplotlib figure keeps the historical PNG-only behaviour and warns that the
-figure has not yet been migrated to plotly; both paths coexist during the migration.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
@@ -51,8 +61,9 @@ def document_repo():
     value = os.environ.get(DOC_REPO_ENV)
     if not value:
         raise RuntimeError(
-            f"{DOC_REPO_ENV} is not set. Point it at the LaTeX document repo root, e.g.\n"
-            f'    $env:{DOC_REPO_ENV} = "C:\\Users\\<you>\\Documents\\Projects\\<document-repo>"'
+            f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
+            f"    {DOC_REPO_ENV}=/path/to/my-document\n"
+            "pointing at the LaTeX document repo root — the directory containing Chapters/."
         )
     repo = Path(value)
     if not (repo / "Chapters").is_dir():
@@ -282,7 +293,12 @@ def _resolve_chapter_dir(chapter, chapters_root=None):
 
 
 def _resolve_html_dir(html_dir):
-    """The interactive-HTML output directory: argument, else env var, else default."""
+    """The figure output directory: argument, else env var, else default.
+
+    Named for the interactive exports because that is what it mostly holds, but it also
+    holds figures_manifest.json — so a matplotlib-only project gets this directory too,
+    containing the manifest and nothing else.
+    """
     html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
     html_dir.mkdir(parents=True, exist_ok=True)
     return html_dir
@@ -294,23 +310,38 @@ def _write_static_png(fig, save_path, **write_image_kwargs):
         import kaleido  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "Static PNG export of plotly figures needs the 'kaleido' package: "
-            "run `uv add kaleido` / `pip install kaleido` in this environment."
+            "Static PNG export of plotly figures needs the 'kaleido' package, which "
+            "the plotly extra installs:\n"
+            "    uv sync --extra plotly    (or: uv add kaleido / pip install kaleido)"
         ) from exc
     fig.write_image(str(save_path), **write_image_kwargs)
+
+
+def _matplotlib_figure():
+    """The current matplotlib figure, or an ImportError naming the extra."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError(
+            "save_document_figure() without a `fig` argument saves the current "
+            "matplotlib figure, and matplotlib is not installed:\n"
+            "    uv sync --extra matplotlib    (or pass fig=<your figure>)"
+        ) from exc
+    return plt.gcf()
 
 
 def _default_hover_warning(fig, stem):
     """Warn when every trace still has plotly's default hover text.
 
-    A converted figure earns its interactivity through an explicit hovertemplate
-    (dwelling ID, estimate, uncertainty); default hover text means the conversion is
-    not finished.
+    The interactive export is the reason for the dual output, and a figure whose hover
+    text is plotly's default gives a reader nothing the PNG did not already give them.
     """
     if not any(getattr(trace, "hovertemplate", None) for trace in fig.data):
         warnings.warn(
-            f"Figure '{stem}' has no hovertemplate on any trace — set an explicit "
-            "hovertemplate (dwelling ID, estimate, uncertainty) before calling it done.",
+            f"Figure '{stem}' has no hovertemplate on any trace - the interactive "
+            "export will show plotly's default hover text. Set an explicit "
+            "hovertemplate naming the fields that identify a point, and pass them as "
+            "hover_fields=[...].",
             stacklevel=3,
         )
 
@@ -328,8 +359,9 @@ def _update_manifest(html_dir, key, entry):
     """Create/refresh one entry in <html_dir>/figures_manifest.json.
 
     Keyed by LaTeX label ("Fig: <label>") to match the publishing agent's figures.json, whose
-    FigureEmitter reads `interactive` as a path relative to this manifest file. The
-    manifest is rewritten on every save rather than maintained by hand.
+    FigureEmitter reads `interactive` as a path relative to this manifest file — and
+    falls through to the static PNG when it is null, which is how a matplotlib figure
+    publishes. The manifest is rewritten on every save rather than maintained by hand.
     """
     manifest_path = Path(html_dir) / MANIFEST_NAME
     manifest = {}
@@ -348,8 +380,8 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, chapter=No
     """Save a document figure: PNG into the LaTeX tree, plus interactive HTML if plotly.
 
     name is the figure file name; if it has no extension, ".png" is assumed. fig may be
-    a plotly Figure (preferred) or a matplotlib Figure (legacy; defaults to the current
-    matplotlib figure when omitted). The chapter directory is chosen interactively
+    a plotly Figure (preferred) or a matplotlib Figure (static only); omitting it saves
+    the current matplotlib figure. The chapter directory is chosen interactively
     unless chapter is given (a path relative to $DOC_REPO/Chapters, e.g.
     "Results/ptg_application"), and the PNG is written to its Figures/ sub-directory —
     same filename and location as always, since the LaTeX and the publishing agent reference it
@@ -360,14 +392,16 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, chapter=No
     Plotly figures additionally write <stem>.html into the local html directory
     (html_dir argument, else $FIGURES_HTML_DIR, else the repo's figures_html/)
     with include_plotlyjs="directory", so one shared plotly.min.js sits alongside and
-    the exports work offline — the publishing agent's site builder copies both. The manifest
-    entry is keyed by "Fig: <label>" and carries {interactive, static, stem, generated,
-    notebook, hover_fields}; hover_fields documents the identifying fields the figure's
-    hovertemplates expose. static_scale is the kaleido export scale. Extra keyword
-    arguments are forwarded to write_image (plotly) or savefig (matplotlib).
+    the exports work offline — the publishing agent's site builder copies both.
 
-    Matplotlib figures keep the historical PNG-only behaviour and warn that the figure
-    is not yet migrated. Returns the saved PNG Path.
+    Every figure, either backend, gets a manifest entry in that directory keyed by
+    "Fig: <label>" and carrying {interactive, static, stem, backend, generated,
+    notebook, hover_fields}. interactive is null for a matplotlib figure; hover_fields
+    documents the identifying fields a plotly figure's hovertemplates expose.
+    static_scale is the kaleido export scale (plotly only). Extra keyword arguments are
+    forwarded to write_image (plotly) or savefig (matplotlib).
+
+    Returns the saved PNG Path.
     """
     chapter_dir = _resolve_chapter_dir(chapter, chapters_root)
 
@@ -380,15 +414,16 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, chapter=No
     stem = save_path.stem
 
     if fig is None:
-        import matplotlib.pyplot as plt
-        fig = plt.gcf()
+        fig = _matplotlib_figure()
+
+    resolved_html_dir = _resolve_html_dir(html_dir)
 
     if _is_plotly_figure(fig):
+        backend = "plotly"
         save_kwargs.setdefault("scale", static_scale)
         _write_static_png(fig, save_path, **save_kwargs)
         print(f"Saved figure to: {save_path}")
 
-        resolved_html_dir = _resolve_html_dir(html_dir)
         html_path = resolved_html_dir / f"{stem}.html"
         # "directory" (not "cdn"): the publishing agent's site builder copies the sibling
         # plotly*.js alongside the export so the published site works offline.
@@ -399,28 +434,31 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, chapter=No
             config={"displaylogo": False},
         )
         print(f"Saved interactive figure to: {html_path}")
+        interactive = html_path.name
 
         _default_hover_warning(fig, stem)
-        _update_manifest(
-            resolved_html_dir,
-            f"Fig: {label or stem}",
-            {
-                "interactive": html_path.name,
-                "static": str(save_path),
-                "stem": stem,
-                "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "notebook": notebook or _detect_notebook(),
-                "hover_fields": list(hover_fields) if hover_fields else [],
-            },
-        )
     else:
-        warnings.warn(
-            f"Figure '{stem}' is matplotlib — saved as PNG only, no interactive HTML. "
-            "Migrate it to plotly (PACKAGE_NAME.theme) to get the dual output.",
-            stacklevel=2,
-        )
+        # Not a warning: choosing matplotlib is a choice, and a warning on every save
+        # is how a project learns to ignore the channel the checks above rely on.
+        # ASCII only - this prints to a Windows console under cp1252.
+        backend, interactive = "matplotlib", None
         fig.savefig(save_path, **save_kwargs)
         print(f"Saved figure to: {save_path}")
+        print("  static only (matplotlib) - no interactive export")
+
+    _update_manifest(
+        resolved_html_dir,
+        f"Fig: {label or stem}",
+        {
+            "interactive": interactive,
+            "static": str(save_path),
+            "stem": stem,
+            "backend": backend,
+            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "notebook": notebook or _detect_notebook(),
+            "hover_fields": list(hover_fields) if hover_fields else [],
+        },
+    )
 
     add_commented_figure_to_tex(save_path.name, chapter_dir, caption=caption, label=label,
                                 tex=tex)

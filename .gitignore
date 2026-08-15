@@ -8,6 +8,12 @@
 /figures_html/
 figures_manifest.json
 
+# ---- local configuration ----
+# DOC_REPO and friends live here rather than in a shell profile, so a second checkout
+# cannot silently inherit the first one's document repo. Per-machine paths, never
+# committed; .env.example is the committed template.
+.env
+
 # ---- python ----
 __pycache__/
 *.py[cod]
