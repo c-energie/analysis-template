@@ -1,6 +1,6 @@
 # Which figures and tables a notebook run may write into the document repo.
 #
-# Read by PACKAGE_NAME.figure_config. In short:
+# Read by doc_analysis.figure_config. In short:
 #   * a name not listed here is appended with `default` below, and that value is honoured
 #     immediately -- so with default = true a newly named figure saves on sight and
 #     records itself, and with default = false it records itself as off and waits;

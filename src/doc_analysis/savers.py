@@ -13,9 +13,9 @@ figure belongs, which is part of what the notebook *is*, whereas the config says
 this particular run should write it.
 """
 
-from PACKAGE_NAME.figure_config import FIGURES, TABLES, entry_name, is_enabled
-from PACKAGE_NAME.save_figure import save_document_figure
-from PACKAGE_NAME.save_table import save_document_table
+from doc_analysis.figure_config import FIGURES, TABLES, entry_name, is_enabled
+from doc_analysis.save_figure import save_document_figure
+from doc_analysis.save_table import save_document_table
 
 
 def notebook_savers(chapter, notebook, tex=None, section=None, config_path=None):

@@ -15,9 +15,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from PACKAGE_NAME import (add_commented_figure_to_tex, find_figure_reference,
+from doc_analysis import (add_commented_figure_to_tex, find_figure_reference,
                             find_table_reference, save_document_table)
-from PACKAGE_NAME.save_figure import figure_reference_state
+from doc_analysis.save_figure import figure_reference_state
 
 LIVE = """\\begin{figure}[H]
     \\centering

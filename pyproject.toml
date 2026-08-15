@@ -1,19 +1,23 @@
 [project]
 name = "PACKAGE-NAME"
 version = "0.1.0"
-description = "Figure and table tooling for a LaTeX document: one plotly figure produces the committed PNG and an interactive HTML export."
+description = "Figure and table tooling for a LaTeX document: one plotly figure produces the committed PNG and an interactive HTML export, with a static matplotlib fallback."
 authors = [{ name = "<<AUTHOR>>" }]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.11"
+# 3.11.4 rather than 3.11 because the `publish` extra's doc-publish requires it, and uv
+# resolves every extra when it locks — so a looser floor here fails the whole `uv sync`,
+# extras you are not installing included.
+requires-python = ">=3.11.4"
 
 # Deliberately minimal, and deliberately free of any private package: the tooling must
 # stay installable by anyone. Your notebooks will need an analysis stack of their own —
 # add it as an optional extra (see below) rather than a hard dependency, so this package
 # remains usable on its own.
+#
+# Neither plotting backend is here: pick one below. The saver reads the backend off the
+# figure object you hand it, so nothing needs configuring to match your choice.
 dependencies = [
-    "plotly>=6.0,<7.0",
-    "kaleido>=1.0,<2.0",
     "pandas>=2.0",
     # DataFrame.to_latex() goes through the Styler, which needs jinja2. Easy to miss:
     # Jupyter pulls it in, so a table only fails in an environment without notebooks.
@@ -21,7 +25,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The preferred backend, and the documented default: one figure object produces the
+# committed PNG (via kaleido) *and* the interactive HTML export, so the two cannot
+# drift. kaleido downloads a headless Chrome to render the PNG, which is why this is an
+# extra rather than a hard dependency — a matplotlib-only project should not pay for it.
+plotly = ["plotly>=6.0,<7.0", "kaleido>=1.0,<2.0"]
+
+# The fallback: static PNGs only, no interactive export. Everything else — the LaTeX
+# append, the config gate, the manifest, both parity checks — works identically.
+matplotlib = ["matplotlib>=3.8"]
+
 notebooks = ["ipykernel>=6.29", "jupyter>=1.1"]
+
+# Backend-free on purpose: the tests stub the figure objects, so `pytest` runs on a bare
+# install and CI never waits for a Chrome download.
 dev = ["pytest>=8"]
 
 # Publishing the document: corpus build, Notion sync, Quarto site. This is the Python
@@ -46,8 +63,8 @@ publish = ["doc-publish @ git+https://github.com/c-energie/doc-publish.git"]
 # doc-publish = { git = "https://github.com/c-energie/doc-publish" }
 
 [project.scripts]
-check-figure-parity = "PACKAGE_NAME.parity:main"
-init-figures-config = "PACKAGE_NAME.figure_config:main"
+check-figure-parity = "doc_analysis.parity:main"
+init-figures-config = "doc_analysis.figure_config:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
