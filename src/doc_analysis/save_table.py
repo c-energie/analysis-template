@@ -5,7 +5,8 @@ import pandas as pd
 
 from doc_analysis.save_figure import (
     _append_commented_block,
-    _resolve_chapter_dir,
+    _one_of,
+    _resolve_section_dir,
 )
 
 LIBRARY_NAME = "tables.tex"
@@ -48,8 +49,8 @@ def dataframe_to_latex(df, index=False, decimals=2, escape=False, column_format=
     )
 
 
-def find_table_reference(chapter_dir, tag, exclude=()):
-    """The .tex file in chapter_dir that already pulls in table *tag*, or None.
+def find_table_reference(section_dir, tag, exclude=()):
+    """The .tex file in section_dir that already pulls in table *tag*, or None.
 
     Matches \\ExecuteMetaData[<any library path>]{tag} whether commented or live, so the
     path spelling (bare ``tables.tex`` or repo-root-relative) does not matter. Mirrors
@@ -57,7 +58,7 @@ def find_table_reference(chapter_dir, tag, exclude=()):
     """
     pattern = re.compile(r"\\ExecuteMetaData\s*\[[^\]]*\]\s*\{\s*" + re.escape(tag) + r"\s*\}")
     exclude = set(exclude)
-    for tex_path in sorted(Path(chapter_dir).glob("*.tex")):
+    for tex_path in sorted(Path(section_dir).glob("*.tex")):
         if tex_path.name in exclude:
             continue
         for raw_line in tex_path.read_text(encoding="utf-8").splitlines():
@@ -107,14 +108,14 @@ def _write_table_to_library(library_path, tag, block):
     return library_path
 
 
-def save_document_table(df, name, caption=None, label=None, chapters_root=None,
+def save_document_table(df, name, caption=None, label=None, sections_root=None,
                       library_name=LIBRARY_NAME, add_reference=True, index=False,
-                      decimals=2, escape=False, column_format=None, *, chapter=None,
-                      tex=None, **to_latex_kwargs):
+                      decimals=2, escape=False, column_format=None, *, section=None,
+                      tex=None, chapter=None, chapters_root=None, **to_latex_kwargs):
     """Save a DataFrame as a LaTeX table into a per-leaf shared table library file.
 
-    The chapter directory is chosen interactively unless chapter is given (a path
-    relative to $DOC_REPO/Chapters, e.g. "Results/ptg_application"); tex names
+    The section directory is chosen interactively unless section is given (a path
+    relative to $DOC_REPO/Sections, e.g. "Results/ptg_application"); tex names
     the .tex file that receives the commented reference, so unattended notebook runs
     never prompt. The DataFrame is
     rendered with dataframe_to_latex (booktabs, fixed decimals, aligned columns) and wrapped
@@ -127,15 +128,20 @@ def save_document_table(df, name, caption=None, label=None, chapters_root=None,
     Pull an individual table into the prose with \\ExecuteMetaData[tables.tex]{name}
     (requires \\usepackage{catchfilebetweentags}). When add_reference is True that command is
     appended, commented out, to a .tex file in the chosen directory as a ready-to-place
-    snippet — but only if no .tex in the chapter pulls the tag in already (commented or
+    snippet — but only if no .tex in the section pulls the tag in already (commented or
     live), so re-saving never accumulates duplicate snippets. tex names the target file,
     tex=False suppresses the snippet, and several candidate .tex files raise rather than
     prompt. caption defaults to a TODO placeholder and label to name (giving
     \\label{Tab: <name>}). index, decimals, escape, column_format and any extra keyword
     arguments are forwarded to dataframe_to_latex. Returns the library file Path.
+
+    chapter= and chapters_root= are the pre-rename spellings of section= and
+    sections_root=. They still work and warn; passing both spellings raises.
     """
-    chapter_dir = _resolve_chapter_dir(chapter, chapters_root)
-    library_path = chapter_dir / library_name
+    section = _one_of("section", section, "chapter", chapter)
+    sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
+    section_dir = _resolve_section_dir(section, sections_root)
+    library_path = section_dir / library_name
 
     tag = Path(name).stem
     caption = caption if caption is not None else "TODO: caption"
@@ -147,13 +153,13 @@ def save_document_table(df, name, caption=None, label=None, chapters_root=None,
     _write_table_to_library(library_path, tag, block)
 
     if add_reference:
-        already = find_table_reference(chapter_dir, tag, exclude={library_name})
+        already = find_table_reference(section_dir, tag, exclude={library_name})
         if already is not None:
             print(f"Table '{tag}' is already pulled in by {already.name}; "
                   f"no reference appended.")
         elif tex is not False:
             reference = f"\\ExecuteMetaData[{library_name}]{{{tag}}}"
-            _append_commented_block(chapter_dir, reference, exclude={library_name},
+            _append_commented_block(section_dir, reference, exclude={library_name},
                                     tex_name=None if tex is True else tex)
 
     return library_path

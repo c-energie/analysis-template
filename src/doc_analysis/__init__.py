@@ -32,7 +32,9 @@ from doc_analysis.save_figure import (
     chapters_dir,
     find_figure_reference,
     save_document_figure,
+    sections_dir,
     select_chapter_dir,
+    select_section_dir,
     document_repo,
 )
 from doc_analysis.save_table import (
@@ -52,10 +54,10 @@ __all__ = [
     "CATEGORICAL",
     "DIVERGING",
     "add_commented_figure_to_tex",
-    "chapters_dir",
     "find_figure_reference",
     "save_document_figure",
-    "select_chapter_dir",
+    "sections_dir",
+    "select_section_dir",
     "document_repo",
     "dataframe_to_latex",
     "find_table_reference",
@@ -64,6 +66,9 @@ __all__ = [
     "is_enabled",
     "load_config",
     "notebook_savers",
+    # Deprecated spellings, kept importable for pre-rename notebooks.
+    "chapters_dir",
+    "select_chapter_dir",
 ]
 
 # Which names come from which extra. Probing with find_spec rather than catching

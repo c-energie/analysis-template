@@ -67,12 +67,12 @@ class FakeMatplotlibFigure:
 
 @pytest.fixture
 def document(tmp_path):
-    """A document repo layout plus an html dir, as (chapter_dir, html_dir, repo)."""
-    chapter = tmp_path / "repo" / "Chapters" / "Example"
-    chapter.mkdir(parents=True)
-    (chapter / "example.tex").write_text("", encoding="utf-8")
+    """A document repo layout plus an html dir, as (section_dir, html_dir, repo)."""
+    section = tmp_path / "repo" / "Sections" / "Example"
+    section.mkdir(parents=True)
+    (section / "example.tex").write_text("", encoding="utf-8")
     html_dir = tmp_path / "figures_html"
-    return chapter, html_dir, tmp_path / "repo"
+    return section, html_dir, tmp_path / "repo"
 
 
 @pytest.fixture
@@ -86,18 +86,18 @@ def manifest_of(html_dir):
 
 
 def save(fig, document, name="example_scatter.png", **kwargs):
-    chapter, html_dir, _ = document
-    return save_document_figure(name, fig=fig, chapter=chapter, html_dir=html_dir,
+    section, html_dir, _ = document
+    return save_document_figure(name, fig=fig, section=section, html_dir=html_dir,
                                 **kwargs)
 
 
 # --------------------------------------------------------------- matplotlib
 
 def test_matplotlib_save_writes_only_the_png(document):
-    chapter, html_dir, _ = document
+    section, html_dir, _ = document
     path = save(FakeMatplotlibFigure(), document)
 
-    assert path == chapter / "Figures" / "example_scatter.png"
+    assert path == section / "Figures" / "example_scatter.png"
     assert path.exists()
     assert not (html_dir / "example_scatter.html").exists()
 
@@ -123,9 +123,9 @@ def test_matplotlib_save_emits_no_warning(document):
 
 def test_matplotlib_save_appends_the_commented_block(document):
     """The LaTeX side is backend-blind: same append, same gate."""
-    chapter, _, _ = document
+    section, _, _ = document
     save(FakeMatplotlibFigure(), document)
-    tex = (chapter / "example.tex").read_text(encoding="utf-8")
+    tex = (section / "example.tex").read_text(encoding="utf-8")
     assert "example_scatter" in tex
     assert all(line.startswith("%") for line in tex.splitlines() if line.strip())
 
@@ -140,7 +140,7 @@ def test_fig_none_without_matplotlib_names_the_extra(document, monkeypatch):
 # --------------------------------------------------------------- plotly
 
 def test_plotly_save_writes_png_and_html(document, kaleido):
-    chapter, html_dir, _ = document
+    section, html_dir, _ = document
     fig = FakePlotlyFigure(hovertemplate="case=%{customdata[0]}")
     path = save(fig, document)
 

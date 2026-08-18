@@ -7,9 +7,9 @@
 #   * the two master switches veto a whole kind at once, but never turn an entry on;
 #   * entries are keyed by the artefact stem, so "x.png" and "x" are the same entry.
 #
-# Sections are notebook stems and fill themselves in as notebooks run. Set an entry to
-# false to stop regenerating a figure you have settled on -- that is the point of the
-# file: turning one artefact off should never mean editing a notebook.
+# The tables below are keyed by notebook stem -- not by document section -- and fill
+# themselves in as notebooks run. Set an entry to false to stop regenerating a figure you
+# have settled on: turning one artefact off should never mean editing a notebook.
 
 default = true
 save_figures = true

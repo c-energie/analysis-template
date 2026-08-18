@@ -69,7 +69,7 @@ naming it, rather than failing somewhere further along.
 these are per-machine paths rather than project settings:
 
 ```bash
-DOC_REPO=/path/to/my-document      # must contain Chapters/
+DOC_REPO=/path/to/my-document      # must contain Sections/
 ```
 
 Loaded on import of `doc_analysis`, so notebooks, tests and the console scripts all see
@@ -97,8 +97,8 @@ So `import doc_analysis` is the same line in every project built from this templ
 ```python
 from doc_analysis import notebook_savers, figure_size
 
-CHAPTER, NOTEBOOK, TEX = "Example", "example_figure.ipynb", "example.tex"
-save_fig, save_table = notebook_savers(chapter=CHAPTER, notebook=NOTEBOOK, tex=TEX)
+SECTION, NOTEBOOK, TEX = "Example", "example_figure.ipynb", "example.tex"
+save_fig, save_table = notebook_savers(section=SECTION, notebook=NOTEBOOK, tex=TEX)
 
 fig.update_layout(**figure_size(6.0, 4.5))     # inches
 save_fig(fig, "example_scatter.png", hover_fields=["case", "measured"])
@@ -111,8 +111,8 @@ there is nothing to hover over:
 import matplotlib.pyplot as plt
 from doc_analysis import notebook_savers, figure_size_in
 
-CHAPTER, NOTEBOOK, TEX = "Example", "example_figure.ipynb", "example.tex"
-save_fig, save_table = notebook_savers(chapter=CHAPTER, notebook=NOTEBOOK, tex=TEX)
+SECTION, NOTEBOOK, TEX = "Example", "example_figure.ipynb", "example.tex"
+save_fig, save_table = notebook_savers(section=SECTION, notebook=NOTEBOOK, tex=TEX)
 
 fig, ax = plt.subplots(**figure_size_in(6.0, 4.5))     # inches, same numbers
 ax.scatter(x, y)
@@ -171,9 +171,9 @@ These are the ones worth knowing before you lose an afternoon.
   reason for the dual output, and default hover text gives a reader nothing the PNG did
   not. `save_fig` warns when no trace has one. (Not applicable on matplotlib, which does
   not warn about anything — a static figure is a complete figure.)
-- **Pass `chapter=` explicitly** (`notebook_savers` does). Omitting it drops into an
+- **Pass `section=` explicitly** (`notebook_savers` does). Omitting it drops into an
   interactive picker, which hangs an unattended run.
-- **`tex=` only matters where a chapter holds several `.tex` files.** Appending a figure
+- **`tex=` only matters where a section holds several `.tex` files.** Appending a figure
   block is gated on the document not already referencing the figure — commented blocks
   count — so re-running never duplicates one, and an ambiguous target raises rather than
   guessing.
@@ -188,8 +188,8 @@ These are the ones worth knowing before you lose an afternoon.
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |
-| `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Chapters/<chapter>/Figures/`, a manifest entry, and — for a plotly figure — the interactive HTML. |
-| `save_table.py` | `save_document_table()`: booktabs LaTeX into a per-chapter `tables.tex`, tagged so re-saving replaces in place. |
+| `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Sections/<section>/Figures/`, a manifest entry, and — for a plotly figure — the interactive HTML. |
+| `save_table.py` | `save_document_table()`: booktabs LaTeX into a per-section `tables.tex`, tagged so re-saving replaces in place. |
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |
 | `savers.py` | `notebook_savers()` — the pair every notebook uses. |
 | `parity.py` | The `check-figure-parity` console script. |

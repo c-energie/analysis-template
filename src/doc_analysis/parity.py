@@ -13,7 +13,7 @@ usually breaks, and two figures of identical dimensions can differ wildly in whe
 axis labels are readable. Eyeball anything you have restyled.
 
 **Is a figure actually in the document?** `--figures` cross-references the manifest of
-everything saved against the chapter sources. A figure whose `\\begin{figure}` block was
+everything saved against the section sources. A figure whose `\\begin{figure}` block was
 never written, or is still commented out, passes every other check and is invisible in the
 PDF. That mode is a report, not a gate, and always exits 0.
 
@@ -31,11 +31,12 @@ import sys
 from pathlib import Path
 
 from doc_analysis.save_figure import (
-    CHAPTERS_DIRNAME,
+    SECTIONS_DIRNAME,
     DEFAULT_HTML_DIR,
     HTML_DIR_ENV,
     MANIFEST_NAME,
     figure_reference_state,
+    section_root_name,
     document_repo as resolve_document_repo,
 )
 
@@ -144,7 +145,7 @@ def check_figures_placed(document_repo, html_dir=None):
     (which is the normal state during migration — the block is added commented and
     uncommented once the prose lands). Parity cannot see that, because the PNG is
     correct either way. Cross-references the manifest of everything saved against the
-    Chapters tree and buckets each figure by how it is referenced.
+    Sections tree and buckets each figure by how it is referenced.
 
     Returns 0 always: a commented block is a legitimate work-in-progress state, not a
     failure. This is a report, not a gate.
@@ -156,17 +157,17 @@ def check_figures_placed(document_repo, html_dir=None):
         return 0
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    chapters = document_repo / CHAPTERS_DIRNAME
+    sections = document_repo / (section_root_name(document_repo) or SECTIONS_DIRNAME)
 
     buckets = {"live": [], "commented": [], None: []}
     for key, entry in sorted(manifest.items()):
         stem = entry.get("stem") or key.removeprefix("Fig: ")
         label = key.removeprefix("Fig: ")
-        state, tex_path = figure_reference_state(chapters, stem, label)
+        state, tex_path = figure_reference_state(sections, stem, label)
         where = tex_path.relative_to(document_repo) if tex_path else None
         buckets[state].append((stem, where, entry.get("notebook")))
 
-    print(f"{len(manifest)} figures in {manifest_path.name}, checked against {chapters}\n")
+    print(f"{len(manifest)} figures in {manifest_path.name}, checked against {sections}\n")
     print(f"  rendered (live block)      {len(buckets['live'])}")
     print(f"  commented block only       {len(buckets['commented'])}")
     print(f"  no reference at all        {len(buckets[None])}")
