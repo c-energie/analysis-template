@@ -20,6 +20,9 @@ the document repo knows nothing about Python, and this package never reads your 
 
 ## Start here
 
+Setting all three repositories up for the first time? The end-to-end order lives in the
+document repo: [writing-template/SETUP.md](https://github.com/c-energie/writing-template/blob/main/SETUP.md).
+
 1. **Use this template** on GitHub to create your repository.
 2. `python init.py` — names the project, asks which plotting backend you want, writes
    your `.env`, then deletes itself.
@@ -138,11 +141,11 @@ save_tables = true
 example_scatter = true
 ```
 
-Sections are notebook stems and fill themselves in as notebooks run. An unlisted name
-takes `default` and is recorded with it — there is no "first run is special" case, so what
-the file says is what happens even for a name it has never seen. Set an entry to `false`
-to stop regenerating a figure you have settled on; that is the whole point, that turning
-one artefact off never means editing a notebook.
+The tables are keyed by **notebook stem** — not by document section — and fill themselves
+in as notebooks run. An unlisted name takes `default` and is recorded with it: there is no
+"first run is special" case, so what the file says is what happens even for a name it has
+never seen. Set an entry to `false` to stop regenerating a figure you have settled on;
+that is the whole point, that turning one artefact off never means editing a notebook.
 
 `init-figures-config` creates the file, prompting for the three global flags.
 
