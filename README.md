@@ -20,23 +20,57 @@ the document repo knows nothing about Python, and this package never reads your 
 
 ## Start here
 
-Setting all three repositories up for the first time? The end-to-end order lives in the
-document repo: [writing-template/SETUP.md](https://github.com/c-energie/writing-template/blob/main/SETUP.md).
+This is a **GitHub template**, not a repository to fork or clone: the copy you run your
+analysis from is your own repository, with its own history and no link back here.
 
-1. **Use this template** on GitHub to create your repository.
-2. `python init.py` — names the project, asks which plotting backend you want, writes
-   your `.env`, then deletes itself.
-3. Install, with the backend you chose:
+**Do the document repository first.** This one asks for its path during setup, and every
+figure it writes lands there. If you have not created it yet, start at
+[writing-template](https://github.com/c-energie/writing-template) and come back.
+
+**1. Create your repository.** On
+[c-energie/analysis-template](https://github.com/c-energie/analysis-template), press
+**Use this template → Create a new repository**. Name it for the document it serves
+(`<document>-analysis` reads well), and make it private if your data is — a template's
+visibility is not inherited.
+
+**2. Clone it and fill in the placeholders.**
+
+```bash
+git clone https://github.com/<you>/<your-analysis>.git
+cd <your-analysis>
+python init.py
+```
+
+`init.py` asks four things — project name, author, the path to your document repo, and
+which plotting backend you want — then writes your `.env` and deletes itself. Run it once,
+in **your** repository; it edits in place and then removes itself, so it is not something
+to run in a checkout of the template. The path can be left blank and set later in `.env`.
+
+**3. Install, with the backend you chose** (Python 3.11.4+):
 
 ```bash
 uv sync --extra dev --extra notebooks --extra plotly       # preferred
 uv sync --extra dev --extra notebooks --extra matplotlib   # static-only fallback
 ```
 
-4. Run `notebooks/example/example_figure.ipynb`. It uses synthetic data, so it works
-   before you have wired up anything of your own, and it writes a real figure into the
-   document repo. (It is a plotly notebook; on matplotlib, start from the usage block
-   below instead.)
+`pip install -e '.[dev,notebooks,plotly]'` does the same if you would rather not use `uv`.
+
+**4. Prove the wiring before writing any analysis of your own.** Run
+`notebooks/example/example_figure.ipynb`. It uses synthetic data, so it works before
+anything of yours is connected, and it writes a real figure into the document repo. (It is
+a plotly notebook; on matplotlib, start from the [usage block](#usage) below instead.)
+
+**5. Check the document repo, and commit there.** You should find a new PNG under
+`Sections/Example/Figures/` and a commented-out `\begin{figure}` block appended to
+`Sections/Example/example.tex`. Committing those is on you — this repository writes them
+and nothing more. Then `check-figure-parity --snapshot` here, to record the baseline.
+
+**6. Make it yours.** Add your own analysis stack as an *extra* in `pyproject.toml` and
+import it in notebooks, never from `src/` — see
+[the last section](#keep-the-tooling-free-of-your-data-layer) for why that matters.
+
+Setting all three repositories up for the first time? The end-to-end order lives in the
+document repo: [writing-template/SETUP.md](https://github.com/c-energie/writing-template/blob/main/SETUP.md).
 
 ## Choosing a backend
 
