@@ -38,6 +38,8 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
+from doc_analysis.env import describe_search
+
 DOC_REPO_ENV = "DOC_REPO"
 HTML_DIR_ENV = "FIGURES_HTML_DIR"
 
@@ -63,11 +65,15 @@ def document_repo():
     """
     value = os.environ.get(DOC_REPO_ENV)
     if not value:
+        # Saying where it looked is what tells a notebook started from the wrong
+        # directory apart from a .env that is genuinely missing the line.
+        looked = "".join(f"\n  - {line}" for line in describe_search())
         raise RuntimeError(
             f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
             f"    {DOC_REPO_ENV}=/path/to/my-document\n"
             f"pointing at the LaTeX document repo root — the directory containing "
             f"{SECTIONS_DIRNAME}/."
+            + (f"\nWhere it looked:{looked}" if looked else "")
         )
     repo = Path(value)
     if section_root_name(repo) is None:

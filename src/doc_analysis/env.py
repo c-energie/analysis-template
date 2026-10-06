@@ -15,7 +15,13 @@ overrides an explicit export:
 
     DOC_REPO=/tmp/scratch pytest tests -q      # beats .env
 
-Loaded once, on import of this package. Stdlib only: `KEY=value` does not justify a
+Loaded once, on import of this package. `notebook_setup()` widens the search by one
+step — the `.env` at the root of the checkout the package is installed from — because a
+notebook kernel started at a workspace root sits *beside* the analysis repo, not inside
+it, and the upward search never reaches its `.env`. That step is an explicit argument
+(`fallback=`), so a plain import keeps exactly the rules above.
+
+Stdlib only: `KEY=value` does not justify a
 dependency, and this file is short enough to read in full.
 """
 
@@ -27,6 +33,14 @@ ENV_FILENAME = ".env"
 #: Points `load_env` at one specific file instead of the upward search. Same name
 #: doc-publish uses, so one setting steers both tools.
 ENV_PATH_VAR = "DOC_ENV"
+
+#: The marker of a checkout root. Without it the package is installed from somewhere
+#: that is not a source tree (a wheel in site-packages), and no `.env` lives there.
+CHECKOUT_MARKER = "pyproject.toml"
+
+#: What the last `load_env` call looked at, for the "DOC_REPO is not set" error: a
+#: missing setting is only fixable once the user knows which files were searched.
+LAST_SEARCH = {"start": None, "found": None, "fallback": None, "checkout": None}
 
 
 def parse_env(text):
@@ -79,13 +93,40 @@ def find_env_file(start=None):
     return None
 
 
-def load_env(start=None, override=False):
+def checkout_root(package_dir=None):
+    """The analysis checkout this package is installed from, or None.
+
+    An editable install imports from `<checkout>/src/doc_analysis`, so the checkout is
+    two levels up — but only if it holds a `pyproject.toml`. A wheel install sits in
+    site-packages, where two levels up is a Python prefix that must never be mistaken
+    for a checkout. `package_dir` defaults to this package's own directory; tests pass
+    a temporary layout instead of installing anything.
+    """
+    package_dir = Path(package_dir) if package_dir else Path(__file__).resolve().parent
+    root = package_dir.resolve().parents[1]
+    return root if (root / CHECKOUT_MARKER).is_file() else None
+
+
+def load_env(start=None, override=False, fallback=None):
     """Merge a `.env` into `os.environ`; returns the file used, or None.
 
     Existing variables are left alone unless override is set — the file is a default
     for the checkout, not an authority over the shell that launched it.
+
+    `fallback` is a directory whose `.env` is used only when the usual resolution finds
+    none. Off by default: only `notebook_setup()` opts in, passing the checkout root.
     """
     path = find_env_file(start)
+    if path is None and fallback is not None:
+        candidate = Path(fallback) / ENV_FILENAME
+        path = candidate if candidate.is_file() else None
+
+    LAST_SEARCH.update(
+        start=Path(start).resolve() if start else Path.cwd().resolve(),
+        found=path,
+        fallback=Path(fallback) if fallback is not None else None,
+        checkout=None,
+    )
     if path is None:
         return None
 
@@ -95,3 +136,31 @@ def load_env(start=None, override=False):
         else:
             os.environ.setdefault(key, value)
     return path
+
+
+def describe_search():
+    """Where the last `load_env` looked, as lines for the "is not set" error.
+
+    A missing setting is only fixable once the user knows which file was meant to
+    carry it — and, for a notebook, why the analysis checkout's `.env` was not reached.
+    """
+    if LAST_SEARCH["start"] is None:
+        return []
+    explicit = os.environ.get(ENV_PATH_VAR)
+    if explicit:
+        lines = [f"${ENV_PATH_VAR} names {explicit}"]
+    else:
+        lines = [f"searched for {ENV_FILENAME} from {LAST_SEARCH['start']} upward"]
+
+    if LAST_SEARCH["found"] is not None:
+        lines.append(f"loaded {LAST_SEARCH['found']}, which does not set it")
+    elif LAST_SEARCH["fallback"] is not None:
+        lines.append(f"then the analysis checkout: no {LAST_SEARCH['fallback'] / ENV_FILENAME}")
+    elif LAST_SEARCH["checkout"] is not None:
+        lines.append(
+            f"skipped the analysis checkout's {ENV_FILENAME}: doc_analysis is installed "
+            f"from {LAST_SEARCH['checkout']}, which has no {CHECKOUT_MARKER} above it — "
+            f"a non-editable install. Install the analysis repo editable (uv sync), "
+            f"or set ${ENV_PATH_VAR} to its {ENV_FILENAME}."
+        )
+    return lines

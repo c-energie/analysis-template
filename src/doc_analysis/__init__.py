@@ -48,9 +48,11 @@ from doc_analysis.figure_config import (
     load_config,
 )
 from doc_analysis.savers import notebook_savers
+from doc_analysis.notebook import notebook_setup
 
 __all__ = [
     "load_env",
+    "notebook_setup",
     "CATEGORICAL",
     "DIVERGING",
     "add_commented_figure_to_tex",
