@@ -43,6 +43,11 @@ appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
 - **A save that appears to do nothing is usually the config.** `figures_config.toml` gates
   every figure and table name that goes through `notebook_savers()`; a name switched off
   returns `None` without writing. Check the config before debugging the saver.
+- **Start every notebook from the template.** `notebook-skeleton new <section> <name>` for
+  a new one, `notebook-skeleton retrofit <notebook> --section <section>` for one copied in
+  from elsewhere. `NOTEBOOK` must equal the file's name — it keys the config table and the
+  manifest — and the script is what keeps it so. `notebooks/_template.ipynb` is the single
+  source of the setup cell; change it there.
 - **Pin `width`/`height` on any figure already committed.** The default size is smaller
   than most, so regenerating without pinning reflows the document silently.
 

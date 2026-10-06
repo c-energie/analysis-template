@@ -65,6 +65,7 @@ publish = ["doc-publish @ git+https://github.com/c-energie/doc-publish.git"]
 [project.scripts]
 check-figure-parity = "doc_analysis.parity:main"
 init-figures-config = "doc_analysis.figure_config:main"
+notebook-skeleton = "doc_analysis.notebook_skeleton:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

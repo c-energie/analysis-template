@@ -164,6 +164,23 @@ integer. A figure can change backend without the document reflowing, and one
 `notebook_savers` binds the routing once so individual calls stay about the figure.
 Whether a call writes anything is decided by `figures_config.toml`, not by the source.
 
+### Starting a notebook
+
+```bash
+notebook-skeleton new Results/ptg_application ptg_fits
+```
+
+copies `notebooks/_template.ipynb` to `notebooks/Results/ptg_application/ptg_fits.ipynb`
+with the setup cell filled in (`SECTION`, `NOTEBOOK`, and `TEX` worked out from the
+section), and a figure cell and a table cell already calling `save_fig` / `save_table` for
+your backend. Name the figure and table before running it: the savers refuse the
+template's `<<FIGURE>>` / `<<TABLE>>` placeholders rather than saving a file by that name.
+
+Bringing in a notebook from an existing project instead? Copy it under `notebooks/`, then
+`notebook-skeleton retrofit <notebook> --section <section>` grafts the same setup cell on
+and lists every line that still saves or exports the old way. It only edits notebooks
+inside this repo's `notebooks/`.
+
 ## The config
 
 ```toml
@@ -217,7 +234,7 @@ These are the ones worth knowing before you lose an afternoon.
 
 ## Architecture
 
-`src/doc_analysis/`, nine modules:
+`src/doc_analysis/`, ten modules:
 
 | Module | What it does |
 |---|---|
@@ -230,6 +247,7 @@ These are the ones worth knowing before you lose an afternoon.
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |
 | `savers.py` | `notebook_savers()` — the pair every notebook uses. |
 | `parity.py` | The `check-figure-parity` console script. |
+| `notebook_skeleton.py` | The `notebook-skeleton` console script: a new notebook from `notebooks/_template.ipynb`, or that template's setup cell grafted onto a copied-in one. |
 
 The manifest is keyed by LaTeX label (`"Fig: <label>"`) and records where each figure came
 from — including its `backend`, and `interactive: null` for a static-only figure, which

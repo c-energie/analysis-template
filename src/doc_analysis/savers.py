@@ -55,10 +55,13 @@ def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
     if notebook is None:
         raise TypeError("notebook_savers() needs notebook= (the .ipynb filename)")
 
+    _refuse_placeholder("section", section)
+    _refuse_placeholder("notebook", notebook)
     config_section = config_section if config_section is not None else entry_name(notebook)
 
     def save_fig(fig, name, hover_fields=None, **kwargs):
         """Write the section PNG and the interactive export, if the config allows it."""
+        _refuse_placeholder("figure name", name)
         if not is_enabled(config_section, name, FIGURES, path=config_path):
             return None
         kwargs.setdefault("tex", tex)
@@ -67,9 +70,21 @@ def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
 
     def save_table(df, name, caption=None, **kwargs):
         """Write a DataFrame into the section's tables.tex, if the config allows it."""
+        _refuse_placeholder("table name", name)
         if not is_enabled(config_section, name, TABLES, path=config_path):
             return None
         kwargs.setdefault("tex", tex)
         return save_document_table(df, name, caption=caption, section=section, **kwargs)
 
     return save_fig, save_table
+
+
+def _refuse_placeholder(what, value):
+    """Raise on a <<...>> token left over from notebooks/_template.ipynb.
+
+    Checked before the config, because an unfilled name would otherwise be recorded in
+    figures_config.toml and saved as a real file called <<FIGURE>>.png.
+    """
+    if isinstance(value, str) and "<<" in value:
+        raise ValueError(f"{what} {value!r} is a placeholder from the notebook template; "
+                         f"replace it (notebook-skeleton fills section and notebook).")

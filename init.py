@@ -123,6 +123,7 @@ def main():
         print("  * The example notebook is plotly, so it will not run here. Copy the")
         print("    matplotlib usage block from the README into a notebook of your own to")
         print("    prove the wiring, then `check-figure-parity --snapshot`.")
+    print("  * Start each notebook with `notebook-skeleton new <section> <name>`.")
     print("  * Add your analysis stack as an extra in pyproject.toml — keep it out of the")
     print("    package itself, so the tooling stays installable on its own.")
 
