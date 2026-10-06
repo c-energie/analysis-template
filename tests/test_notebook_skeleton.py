@@ -43,6 +43,14 @@ def test_new_fills_routing_and_mirrors_the_section(repo):
     assert "<<FIGURE>>" in text  # left for the author to name
 
 
+def test_new_sets_up_through_the_package_not_a_path_walk(repo):
+    assert main(["new", "Results", "fits", "--backend", "plotly"]) == 0
+    text = source(repo / "notebooks" / "Results" / "fits.ipynb")
+    assert "from doc_analysis import notebook_setup, notebook_savers" in text
+    assert "ROOT = notebook_setup()" in text
+    assert "sys.path" not in text and "setup_notebook" not in text
+
+
 def test_new_refuses_a_section_the_document_lacks(repo):
     with pytest.raises(SystemExit, match="not found"):
         main(["new", "Methods", "fits", "--backend", "plotly"])
@@ -77,7 +85,9 @@ def test_retrofit_grafts_setup_after_the_title_and_lists_legacy_lines(repo, caps
     assert main(["retrofit", str(target), "--section", "Results"]) == 0
     cells = json.loads(target.read_text(encoding="utf-8"))["cells"]
     assert "".join(cells[0]["source"]) == "# Old fits\n"
-    assert 'NOTEBOOK = "old_fits.ipynb"' in "".join(cells[2]["source"])
+    grafted = "".join(cells[2]["source"])
+    assert 'NOTEBOOK = "old_fits.ipynb"' in grafted
+    assert "ROOT = notebook_setup()" in grafted and "sys.path" not in grafted
     out = capsys.readouterr().out
     assert "[path hack]" in out and "[figure save]" in out
     assert "sys.path.insert" not in out  # the grafted setup cell is not reported as legacy
