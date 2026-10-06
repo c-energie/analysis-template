@@ -197,7 +197,7 @@ def cmd_retrofit(args):
           f"(section {args.section}, TEX {tex or 'auto'}).")
 
     found = 0
-    grafted = range(at, at + 1 + len(setup))  # the template's own sys.path line is not legacy
+    grafted = range(at, at + 1 + len(setup))  # the template's own cells are never legacy
     for index, cell in enumerate(nb["cells"]):
         if cell["cell_type"] != "code" or index in grafted:
             continue

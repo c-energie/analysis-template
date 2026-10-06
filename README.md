@@ -54,6 +54,9 @@ uv sync --extra dev --extra notebooks --extra matplotlib   # static-only fallbac
 ```
 
 `pip install -e '.[dev,notebooks,plotly]'` does the same if you would rather not use `uv`.
+Add `--extra marimo` if you write notebooks in [marimo](https://marimo.io) rather than
+Jupyter; nothing else changes. Keep the install editable (`uv sync` and `pip install -e`
+both are): an editable install is how a notebook finds this repo from any directory.
 
 **4. Prove the wiring before writing any analysis of your own.** Run
 `notebooks/example/example_figure.ipynb`. It uses synthetic data, so it works before
@@ -110,8 +113,11 @@ DOC_REPO=/path/to/my-document      # must contain Sections/
 ```
 
 Loaded on import of `doc_analysis`, so notebooks, tests and the console scripts all see
-it with no shell setup. **A variable already set in your shell wins**, which keeps CI and
-one-off overrides working:
+it with no shell setup. The file used is `$DOC_ENV` if set, else the nearest `.env` above
+the working directory — and, for a notebook that has called `notebook_setup()`, this
+repo's own `.env` when neither found one, so a kernel started outside the repo still gets
+its `DOC_REPO`. **A variable already set in your shell wins**, which keeps CI and one-off
+overrides working:
 
 ```bash
 DOC_REPO=/tmp/scratch pytest tests -q
@@ -176,10 +182,66 @@ section), and a figure cell and a table cell already calling `save_fig` / `save_
 your backend. Name the figure and table before running it: the savers refuse the
 template's `<<FIGURE>>` / `<<TABLE>>` placeholders rather than saving a file by that name.
 
+`notebook-skeleton new --marimo Results/ptg_application ptg_fits` does the same for
+marimo (needs the `marimo` extra), writing `notebooks/Results/ptg_application/ptg_fits.py`.
+`NOTEBOOK` is then the `.py` filename and the config key its stem, exactly as for a
+`.ipynb`. `retrofit` is Jupyter-only.
+
 Bringing in a notebook from an existing project instead? Copy it under `notebooks/`, then
 `notebook-skeleton retrofit <notebook> --section <section>` grafts the same setup cell on
 and lists every line that still saves or exports the old way. It only edits notebooks
 inside this repo's `notebooks/`.
+
+## Running notebooks
+
+Every notebook starts with the same setup cell:
+
+```python
+from doc_analysis import notebook_setup, notebook_savers
+ROOT = notebook_setup()
+```
+
+`notebook_setup()` loads this repo's `.env`, styles the installed backend, puts
+`notebooks/` on `sys.path` (so a helper module kept beside the notebooks imports from any
+sub-folder) and moves to this repo's root, which it returns. It finds the repo through the
+installed package, not the working directory — so the one thing that matters is that the
+kernel runs **the venv `doc_analysis` is installed into**. In a document workspace that is
+the workspace root's `.venv`; standalone, this repo's own:
+
+| | Interpreter |
+|---|---|
+| Windows | `<venv root>\.venv\Scripts\python.exe` |
+| macOS / Linux | `<venv root>/.venv/bin/python` |
+
+Pick any other and `import doc_analysis` fails, or — worse — imports a different checkout
+and writes into its document.
+
+- **JupyterLab**: `uv run jupyter lab` from this repo. `uv run` uses the right venv, so
+  there is nothing to select.
+- **VS Code**: *Python: Select Interpreter* → the path above, then pick it as the
+  notebook's kernel (top right). Opening the workspace root as the folder is fine.
+- **PyCharm**: *Settings → Python Interpreter → Add → Existing* → the path above. Opening
+  the whole workspace as the project is fine — that case is what `notebook_setup()` exists
+  for: the kernel starts at the workspace root, below which the old upward search never
+  found this repo.
+- **marimo** (`--extra marimo`): `uv run marimo edit notebooks/<section>/<name>.py` from
+  this repo; headless, `uv run marimo export html notebooks/<section>/<name>.py -o out.html`,
+  which runs every cell exactly as the editor does.
+
+Whichever you use, prove the wiring in a cell before any analysis:
+
+```python
+from doc_analysis import notebook_setup, document_repo
+notebook_setup(); print(document_repo())
+```
+
+It should print your document repo. If `DOC_REPO` is unset it raises, listing every place
+it looked for a `.env` — which tells a kernel on the wrong interpreter apart from a `.env`
+missing the line. (On a non-editable install there is no checkout to fall back to, so
+`notebook_setup()` leaves the working directory alone and the error says so.)
+
+Notebooks written against the old `from setup_notebook import ROOT` keep working:
+`notebooks/setup_notebook.py` is now a shim calling `notebook_setup()`.
 
 ## The config
 
@@ -234,11 +296,12 @@ These are the ones worth knowing before you lose an afternoon.
 
 ## Architecture
 
-`src/doc_analysis/`, ten modules:
+`src/doc_analysis/`, eleven modules:
 
 | Module | What it does |
 |---|---|
-| `env.py` | Reads the checkout's `.env` into the environment on import, without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
+| `env.py` | Reads a `.env` into the environment on import — `$DOC_ENV`, else the nearest above the cwd — without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
+| `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the installed checkout's `.env`, styles the backend, chdirs to the repo root. |
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |

@@ -16,7 +16,10 @@ appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
 
 - **Confirm `DOC_REPO` points at the document you think it does before running anything
   that saves.** Resolution (`src/doc_analysis/env.py`): a real environment variable wins,
-  otherwise `$DOC_ENV`, otherwise the nearest `.env` above the cwd. A `.env` never
+  otherwise `$DOC_ENV`, otherwise the nearest `.env` above the cwd, otherwise — only via
+  `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the checkout the
+  package is installed from. So a notebook on the wrong interpreter can read *another*
+  checkout's `.env`; check `document_repo()`, not just that it is set. A `.env` never
   overrides an explicit export.
 - **Never set `DOC_REPO` in a shell profile.** The moment there is a second document it
   points at the wrong one, and the failure is silent — figures land in another document.
@@ -44,10 +47,12 @@ appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
   every figure and table name that goes through `notebook_savers()`; a name switched off
   returns `None` without writing. Check the config before debugging the saver.
 - **Start every notebook from the template.** `notebook-skeleton new <section> <name>` for
-  a new one, `notebook-skeleton retrofit <notebook> --section <section>` for one copied in
-  from elsewhere. `NOTEBOOK` must equal the file's name — it keys the config table and the
-  manifest — and the script is what keeps it so. `notebooks/_template.ipynb` is the single
-  source of the setup cell; change it there.
+  a new one (`--marimo` for a marimo app), `notebook-skeleton retrofit <notebook> --section
+  <section>` for one copied in from elsewhere. `NOTEBOOK` must equal the file's name — it
+  keys the config table and the manifest — and the script is what keeps it so.
+  `notebook_setup()` is the single source of the setup: the templates' setup cell only
+  calls it. Change behaviour there, never by adding path logic to a cell — a cell that
+  walks the filesystem breaks when a kernel starts outside the repo.
 - **Pin `width`/`height` on any figure already committed.** The default size is smaller
   than most, so regenerating without pinning reflows the document silently.
 
