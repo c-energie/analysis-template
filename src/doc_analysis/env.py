@@ -107,7 +107,7 @@ def checkout_root(package_dir=None):
     return root if (root / CHECKOUT_MARKER).is_file() else None
 
 
-def load_env(start=None, override=False, fallback=None):
+def load_env(start=None, override=False, fallback=None, skipped_checkout=None):
     """Merge a `.env` into `os.environ`; returns the file used, or None.
 
     Existing variables are left alone unless override is set — the file is a default
@@ -115,6 +115,10 @@ def load_env(start=None, override=False, fallback=None):
 
     `fallback` is a directory whose `.env` is used only when the usual resolution finds
     none. Off by default: only `notebook_setup()` opts in, passing the checkout root.
+
+    `skipped_checkout` is where the package is installed from when that is not a checkout,
+    so no fallback was possible; it is only recorded, for `describe_search()`. Recording
+    it here, in the same update as the rest, keeps the search record whole after one call.
     """
     path = find_env_file(start)
     if path is None and fallback is not None:
@@ -125,7 +129,7 @@ def load_env(start=None, override=False, fallback=None):
         start=Path(start).resolve() if start else Path.cwd().resolve(),
         found=path,
         fallback=Path(fallback) if fallback is not None else None,
-        checkout=None,
+        checkout=Path(skipped_checkout) if skipped_checkout is not None else None,
     )
     if path is None:
         return None

@@ -183,7 +183,8 @@ your backend. Name the figure and table before running it: the savers refuse the
 template's `<<FIGURE>>` / `<<TABLE>>` placeholders rather than saving a file by that name.
 
 `notebook-skeleton new --marimo Results/ptg_application ptg_fits` does the same for
-marimo (needs the `marimo` extra), writing `notebooks/Results/ptg_application/ptg_fits.py`.
+marimo, writing `notebooks/Results/ptg_application/ptg_fits.py` (it only writes text;
+the `marimo` extra is needed to `marimo edit` or `export` it).
 `NOTEBOOK` is then the `.py` filename and the config key its stem, exactly as for a
 `.ipynb`. `retrofit` is Jupyter-only.
 
@@ -220,7 +221,8 @@ and writes into its document.
   there is nothing to select.
 - **VS Code**: *Python: Select Interpreter* → the path above, then pick it as the
   notebook's kernel (top right). Opening the workspace root as the folder is fine.
-- **PyCharm**: *Settings → Python Interpreter → Add → Existing* → the path above. Opening
+- **PyCharm**: *Settings → Project: <name> → Python Interpreter → Add Interpreter → Add
+  Local Interpreter → select existing* → the path above. Opening
   the whole workspace as the project is fine — that case is what `notebook_setup()` exists
   for: the kernel starts at the workspace root, below which the old upward search never
   found this repo.
@@ -310,7 +312,7 @@ These are the ones worth knowing before you lose an afternoon.
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |
 | `savers.py` | `notebook_savers()` — the pair every notebook uses. |
 | `parity.py` | The `check-figure-parity` console script. |
-| `notebook_skeleton.py` | The `notebook-skeleton` console script: a new notebook from `notebooks/_template.ipynb`, or that template's setup cell grafted onto a copied-in one. |
+| `notebook_skeleton.py` | The `notebook-skeleton` console script: a new notebook from `notebooks/_template.ipynb` (or, with `--marimo`, a marimo app from `notebooks/_template_marimo.py`), or the Jupyter template's setup cell grafted onto a copied-in one. |
 
 The manifest is keyed by LaTeX label (`"Fig: <label>"`) and records where each figure came
 from — including its `backend`, and `interactive: null` for a static-only figure, which

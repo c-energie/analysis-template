@@ -153,6 +153,19 @@ def test_new_marimo_keeps_only_the_chosen_backends_figure_cell(marimo_repo, back
     assert text.count("@app.cell") == 9  # one figure cell of the template's two
 
 
+def test_new_marimo_drops_a_whole_cell_even_with_blank_lines_inside_it(marimo_repo):
+    # Two blank lines inside a cell body look like a cell break; the dropped backend's cell
+    # must still go whole, not leave its tail behind as an unmarked cell.
+    template = marimo_repo / "notebooks" / "_template_marimo.py"
+    text = template.read_text(encoding="utf-8").replace(
+        "import matplotlib.pyplot as plt", "import matplotlib.pyplot as plt\n\n\n    TAIL = 1", 1)
+    template.write_text(text, encoding="utf-8")
+    main(["new", "Results", "fits", "--marimo", "--backend", "plotly"])
+    out = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert "TAIL" not in out and "plt" not in out
+    assert out.count("@app.cell") == 9
+
+
 def test_new_marimo_never_overwrites(marimo_repo):
     target = marimo_repo / "notebooks" / "Results" / "fits.py"
     main(["new", "Results", "fits", "--marimo", "--backend", "plotly"])

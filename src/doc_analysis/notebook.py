@@ -40,13 +40,11 @@ def notebook_setup(package_dir=None):
     else the cwd; `document_repo()` then explains what was searched.
     """
     root = env.checkout_root(package_dir)
-    found = env.load_env(fallback=root)
+    installed_from = Path(package_dir) if package_dir else Path(env.__file__).resolve().parent
+    found = env.load_env(fallback=root, skipped_checkout=installed_from if root is None else None)
     _style()
 
     if root is None:
-        env.LAST_SEARCH["checkout"] = (
-            Path(package_dir) if package_dir else Path(env.__file__).resolve().parent
-        )
         return found.parent if found is not None else Path.cwd()
 
     notebooks = str(root / NOTEBOOKS_DIRNAME)

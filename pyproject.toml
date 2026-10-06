@@ -37,6 +37,11 @@ matplotlib = ["matplotlib>=3.8"]
 
 notebooks = ["ipykernel>=6.29", "jupyter>=1.1"]
 
+# For notebooks written as marimo apps (`notebook-skeleton new --marimo`) instead of
+# Jupyter. Only `marimo edit` / `marimo export` need it: the skeleton writes plain text,
+# and nothing in src/ or tests/ imports marimo, so a Jupyter-only project never pays for it.
+marimo = ["marimo>=0.13"]
+
 # Backend-free on purpose: the tests stub the figure objects, so `pytest` runs on a bare
 # install and CI never waits for a Chrome download.
 dev = ["pytest>=8"]
