@@ -104,3 +104,62 @@ def test_savers_refuse_template_placeholders(tmp_path, kind):
         else:
             save_table(None, "<<TABLE>>")
     assert not (tmp_path / "figures_config.toml").exists()
+
+
+# --- marimo -------------------------------------------------------------------------------
+# The marimo template is checked as text: marimo itself is never imported here.
+
+MARIMO_TEMPLATE = TEMPLATE.with_name("_template_marimo.py")
+
+
+@pytest.fixture
+def marimo_repo(repo):
+    shutil.copy(MARIMO_TEMPLATE, repo / "notebooks" / "_template_marimo.py")
+    return repo
+
+
+def test_new_marimo_writes_an_app_keyed_by_its_py_name(marimo_repo):
+    assert main(["new", "Results", "fits", "--marimo", "--backend", "plotly"]) == 0
+    text = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert not (marimo_repo / "notebooks" / "Results" / "fits.ipynb").exists()
+    assert "app = marimo.App(" in text
+    assert 'SECTION = "Results"' in text
+    assert 'NOTEBOOK = "fits.py"' in text
+    assert "TEX = None" in text
+    assert "ROOT = notebook_setup()" in text and "sys.path" not in text
+    assert "<<FIGURE>>" in text and "<<TABLE>>" in text  # left for the author to name
+    assert "<<SECTION>>" not in text and "<<TITLE>>" not in text
+
+
+@pytest.mark.parametrize("backend, kept, dropped", [
+    ("plotly", "go.Figure()", "plt.subplots"),
+    ("matplotlib", "plt.subplots", "go.Figure()"),
+])
+def test_new_marimo_keeps_only_the_chosen_backends_figure_cell(marimo_repo, backend, kept, dropped):
+    main(["new", "Results", "fits", "--marimo", "--backend", backend])
+    text = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert kept in text and dropped not in text
+    assert "skeleton-backend" not in text  # template-only markers are stripped
+    assert text.count("@app.cell") == 9  # one figure cell of the template's two
+
+
+def test_new_marimo_never_overwrites(marimo_repo):
+    target = marimo_repo / "notebooks" / "Results" / "fits.py"
+    main(["new", "Results", "fits", "--marimo", "--backend", "plotly"])
+    target.write_text("# edited by hand\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="already exists"):
+        main(["new", "Results", "fits.py", "--marimo", "--backend", "plotly"])
+    assert target.read_text(encoding="utf-8") == "# edited by hand\n"
+
+
+def test_new_marimo_refuses_a_section_the_document_lacks(marimo_repo):
+    with pytest.raises(SystemExit, match="not found"):
+        main(["new", "Methods", "fits", "--marimo", "--backend", "plotly"])
+    assert not (marimo_repo / "notebooks" / "Methods").exists()
+
+
+def test_savers_key_a_marimo_app_by_its_stem(tmp_path):
+    config = tmp_path / "figures_config.toml"
+    config.write_text("[fits.figures]\noff = false\n", encoding="utf-8")
+    save_fig, _ = notebook_savers(section=str(tmp_path), notebook="fits.py", config_path=config)
+    assert save_fig(object(), "off.png") is None  # switched off under [fits], not [fits.py]

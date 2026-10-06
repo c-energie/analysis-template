@@ -27,6 +27,10 @@ from importlib.util import find_spec
 from pathlib import Path
 
 TEMPLATE = Path("notebooks") / "_template.ipynb"
+MARIMO_TEMPLATE = Path("notebooks") / "_template_marimo.py"
+# Marks a marimo template cell that belongs to one figure backend; the line itself is dropped.
+MARIMO_BACKEND = re.compile(r"^# skeleton-backend: (\w+)\n", re.MULTILINE)
+CELL_BREAK = "\n\n\n"  # marimo writes two blank lines between cells
 BACKENDS = ("plotly", "matplotlib")
 SAVER_CALL = "notebook_savers("
 
@@ -111,6 +115,8 @@ def write_notebook(path, notebook):
 
 
 def cmd_new(args):
+    if args.marimo:
+        return cmd_new_marimo(args)
     root = find_root()
     name = args.name.removesuffix(".ipynb")
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", name):
@@ -125,6 +131,40 @@ def cmd_new(args):
     target.parent.mkdir(parents=True, exist_ok=True)
     write_notebook(target, dict(template, cells=[cell for _, cell in cells]))
     print(f"Wrote {target.relative_to(root).as_posix()}  (section {args.section}, "
+          f"TEX {tex or 'auto'}). Name the figure and table before running it.")
+    return 0
+
+
+def marimo_source(root, backend, section, notebook, tex, title):
+    """The marimo template for *backend*, filled. Cells are blank-line-separated blocks."""
+    blocks = (root / MARIMO_TEMPLATE).read_text(encoding="utf-8").split(CELL_BREAK)
+    kept = []
+    for block in blocks:
+        marker = MARIMO_BACKEND.search(block)
+        if marker and marker.group(1) != backend:
+            continue
+        kept.append(MARIMO_BACKEND.sub("", block))
+    return fill(CELL_BREAK.join(kept), section, notebook, tex, title)
+
+
+def cmd_new_marimo(args):
+    """`new --marimo`: the same routing as a Jupyter notebook, written as a marimo app."""
+    root = find_root()
+    if not (root / MARIMO_TEMPLATE).exists():
+        sys.exit(f"{MARIMO_TEMPLATE.as_posix()} not found in {root}.")
+    name = args.name.removesuffix(".py")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", name):
+        sys.exit(f"Notebook name {name!r}: letters, digits, '_', '-' and '.' only.")
+    notebook = f"{name}.py"  # the config key is its stem, exactly as for a .ipynb
+    target = root / "notebooks" / (args.dir or args.section) / notebook
+    if target.exists():
+        sys.exit(f"{target} already exists; pick another name or edit that notebook.")
+    tex = resolve_tex(args.section, args.tex)
+    text = marimo_source(root, pick_backend(args.backend), args.section, notebook, tex,
+                         args.title or name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    print(f"Wrote {target.relative_to(root).as_posix()}  (marimo; section {args.section}, "
           f"TEX {tex or 'auto'}). Name the figure and table before running it.")
     return 0
 
@@ -180,6 +220,8 @@ def main(argv=None):
     p.add_argument("name", help="notebook file name, with or without .ipynb")
     p.add_argument("--dir", help="directory under notebooks/ (default: the section path)")
     p.add_argument("--title", help="the notebook's heading (default: its name)")
+    p.add_argument("--marimo", action="store_true",
+                   help="write a marimo app (<name>.py) from notebooks/_template_marimo.py")
     p.set_defaults(func=cmd_new)
 
     p = sub.add_parser("retrofit", help="graft the template's setup onto a copied-in notebook")
