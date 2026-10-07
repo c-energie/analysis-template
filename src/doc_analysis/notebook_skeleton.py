@@ -1,6 +1,7 @@
 """Start a notebook from notebooks/_template.ipynb, or graft its setup onto an existing one.
 
     notebook-skeleton new Results/ptg_application ptg_fits
+    notebook-skeleton new Results/ptg_application ptg_fits --marimo
     notebook-skeleton retrofit notebooks/Results/ptg_application/old_fits.ipynb --section Results/ptg_application
 
 Both fill the template's SECTION, NOTEBOOK and TEX. NOTEBOOK is always the file's real
@@ -12,6 +13,12 @@ saver finds it), and a refusal naming the candidates when it holds several.
 `new` writes notebooks/<section>/<name>.ipynb by default, so the notebooks tree mirrors the
 document's Sections/ tree. Figure and table names stay as <<FIGURE>> / <<TABLE>>: the
 savers refuse a placeholder, so an unnamed artefact raises instead of being saved.
+
+`new --marimo` writes <name>.py from notebooks/_template_marimo.py instead, with the same
+routing. NOTEBOOK is then the .py filename and the config key its stem, exactly as for a
+.ipynb, so switching editors does not orphan a notebook's figures_config.toml table. Only
+running the result needs marimo installed; writing it is plain text. `retrofit` stays
+Jupyter-only: a copied-in notebook is a .ipynb, and marimo converts one itself.
 
 `retrofit` is the step after copying an existing notebook in. It edits notebooks under this
 repository's notebooks/ only -- the original stays wherever it was copied from -- inserts
@@ -27,6 +34,14 @@ from importlib.util import find_spec
 from pathlib import Path
 
 TEMPLATE = Path("notebooks") / "_template.ipynb"
+MARIMO_TEMPLATE = Path("notebooks") / "_template_marimo.py"
+# Marks a marimo template cell that belongs to one figure backend; the line itself is dropped.
+MARIMO_BACKEND = re.compile(r"^# skeleton-backend: (\w+)\n", re.MULTILINE)
+CELL_BREAK = "\n\n\n"  # marimo writes two blank lines between cells
+# Split only where two blank lines are followed by the start of a cell (its backend marker
+# or decorator) or the run guard. A bare CELL_BREAK split would also cut a cell whose body
+# holds two blank lines, and the dropped backend's tail would survive as an unmarked cell.
+CELL_START = re.compile(r"\n\n\n(?=# skeleton-backend: |@app\.|if __name__)")
 BACKENDS = ("plotly", "matplotlib")
 SAVER_CALL = "notebook_savers("
 
@@ -110,23 +125,59 @@ def write_notebook(path, notebook):
     path.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def cmd_new(args):
-    root = find_root()
-    name = args.name.removesuffix(".ipynb")
+def new_target(root, args, suffix):
+    """The new notebook's name, file name, path and TEX; refuses before anything is written."""
+    name = args.name.removesuffix(suffix)
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", name):
         sys.exit(f"Notebook name {name!r}: letters, digits, '_', '-' and '.' only.")
-    notebook = f"{name}.ipynb"
+    notebook = f"{name}{suffix}"  # the config key is its stem, whatever the suffix
     target = root / "notebooks" / (args.dir or args.section) / notebook
     if target.exists():
         sys.exit(f"{target} already exists; pick another name or edit that notebook.")
-    tex = resolve_tex(args.section, args.tex)
+    return name, notebook, target, resolve_tex(args.section, args.tex)
+
+
+def report_new(root, target, args, tex, kind=""):
+    print(f"Wrote {target.relative_to(root).as_posix()}  ({kind}section {args.section}, "
+          f"TEX {tex or 'auto'}). Name the figure and table before running it.")
+    return 0
+
+
+def cmd_new(args):
+    if args.marimo:
+        return cmd_new_marimo(args)
+    root = find_root()
+    name, notebook, target, tex = new_target(root, args, ".ipynb")
     template, cells = template_cells(root, pick_backend(args.backend), args.section, notebook,
                                      tex, args.title or name)
     target.parent.mkdir(parents=True, exist_ok=True)
     write_notebook(target, dict(template, cells=[cell for _, cell in cells]))
-    print(f"Wrote {target.relative_to(root).as_posix()}  (section {args.section}, "
-          f"TEX {tex or 'auto'}). Name the figure and table before running it.")
-    return 0
+    return report_new(root, target, args, tex)
+
+
+def marimo_source(root, backend, section, notebook, tex, title):
+    """The marimo template for *backend*, filled. Cells are blank-line-separated blocks."""
+    blocks = CELL_START.split((root / MARIMO_TEMPLATE).read_text(encoding="utf-8"))
+    kept = []
+    for block in blocks:
+        marker = MARIMO_BACKEND.search(block)
+        if marker and marker.group(1) != backend:
+            continue
+        kept.append(MARIMO_BACKEND.sub("", block))
+    return fill(CELL_BREAK.join(kept), section, notebook, tex, title)
+
+
+def cmd_new_marimo(args):
+    """`new --marimo`: the same routing as a Jupyter notebook, written as a marimo app."""
+    root = find_root()
+    if not (root / MARIMO_TEMPLATE).exists():
+        sys.exit(f"{MARIMO_TEMPLATE.as_posix()} not found in {root}.")
+    name, notebook, target, tex = new_target(root, args, ".py")
+    text = marimo_source(root, pick_backend(args.backend), args.section, notebook, tex,
+                         args.title or name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return report_new(root, target, args, tex, kind="marimo; ")
 
 
 def cmd_retrofit(args):
@@ -157,7 +208,7 @@ def cmd_retrofit(args):
           f"(section {args.section}, TEX {tex or 'auto'}).")
 
     found = 0
-    grafted = range(at, at + 1 + len(setup))  # the template's own sys.path line is not legacy
+    grafted = range(at, at + 1 + len(setup))  # the template's own cells are never legacy
     for index, cell in enumerate(nb["cells"]):
         if cell["cell_type"] != "code" or index in grafted:
             continue
@@ -180,6 +231,8 @@ def main(argv=None):
     p.add_argument("name", help="notebook file name, with or without .ipynb")
     p.add_argument("--dir", help="directory under notebooks/ (default: the section path)")
     p.add_argument("--title", help="the notebook's heading (default: its name)")
+    p.add_argument("--marimo", action="store_true",
+                   help="write a marimo app (<name>.py) from notebooks/_template_marimo.py")
     p.set_defaults(func=cmd_new)
 
     p = sub.add_parser("retrofit", help="graft the template's setup onto a copied-in notebook")

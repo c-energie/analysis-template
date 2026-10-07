@@ -43,6 +43,14 @@ def test_new_fills_routing_and_mirrors_the_section(repo):
     assert "<<FIGURE>>" in text  # left for the author to name
 
 
+def test_new_sets_up_through_the_package_not_a_path_walk(repo):
+    assert main(["new", "Results", "fits", "--backend", "plotly"]) == 0
+    text = source(repo / "notebooks" / "Results" / "fits.ipynb")
+    assert "from doc_analysis import notebook_setup, notebook_savers" in text
+    assert "ROOT = notebook_setup()" in text
+    assert "sys.path" not in text and "setup_notebook" not in text
+
+
 def test_new_refuses_a_section_the_document_lacks(repo):
     with pytest.raises(SystemExit, match="not found"):
         main(["new", "Methods", "fits", "--backend", "plotly"])
@@ -77,7 +85,9 @@ def test_retrofit_grafts_setup_after_the_title_and_lists_legacy_lines(repo, caps
     assert main(["retrofit", str(target), "--section", "Results"]) == 0
     cells = json.loads(target.read_text(encoding="utf-8"))["cells"]
     assert "".join(cells[0]["source"]) == "# Old fits\n"
-    assert 'NOTEBOOK = "old_fits.ipynb"' in "".join(cells[2]["source"])
+    grafted = "".join(cells[2]["source"])
+    assert 'NOTEBOOK = "old_fits.ipynb"' in grafted
+    assert "ROOT = notebook_setup()" in grafted and "sys.path" not in grafted
     out = capsys.readouterr().out
     assert "[path hack]" in out and "[figure save]" in out
     assert "sys.path.insert" not in out  # the grafted setup cell is not reported as legacy
@@ -104,3 +114,75 @@ def test_savers_refuse_template_placeholders(tmp_path, kind):
         else:
             save_table(None, "<<TABLE>>")
     assert not (tmp_path / "figures_config.toml").exists()
+
+
+# --- marimo -------------------------------------------------------------------------------
+# The marimo template is checked as text: marimo itself is never imported here.
+
+MARIMO_TEMPLATE = TEMPLATE.with_name("_template_marimo.py")
+
+
+@pytest.fixture
+def marimo_repo(repo):
+    shutil.copy(MARIMO_TEMPLATE, repo / "notebooks" / "_template_marimo.py")
+    return repo
+
+
+def test_new_marimo_writes_an_app_keyed_by_its_py_name(marimo_repo):
+    assert main(["new", "Results", "fits", "--marimo", "--backend", "plotly"]) == 0
+    text = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert not (marimo_repo / "notebooks" / "Results" / "fits.ipynb").exists()
+    assert "app = marimo.App(" in text
+    assert 'SECTION = "Results"' in text
+    assert 'NOTEBOOK = "fits.py"' in text
+    assert "TEX = None" in text
+    assert "ROOT = notebook_setup()" in text and "sys.path" not in text
+    assert "<<FIGURE>>" in text and "<<TABLE>>" in text  # left for the author to name
+    assert "<<SECTION>>" not in text and "<<TITLE>>" not in text
+
+
+@pytest.mark.parametrize("backend, kept, dropped", [
+    ("plotly", "go.Figure()", "plt.subplots"),
+    ("matplotlib", "plt.subplots", "go.Figure()"),
+])
+def test_new_marimo_keeps_only_the_chosen_backends_figure_cell(marimo_repo, backend, kept, dropped):
+    main(["new", "Results", "fits", "--marimo", "--backend", backend])
+    text = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert kept in text and dropped not in text
+    assert "skeleton-backend" not in text  # template-only markers are stripped
+    assert text.count("@app.cell") == 9  # one figure cell of the template's two
+
+
+def test_new_marimo_drops_a_whole_cell_even_with_blank_lines_inside_it(marimo_repo):
+    # Two blank lines inside a cell body look like a cell break; the dropped backend's cell
+    # must still go whole, not leave its tail behind as an unmarked cell.
+    template = marimo_repo / "notebooks" / "_template_marimo.py"
+    text = template.read_text(encoding="utf-8").replace(
+        "import matplotlib.pyplot as plt", "import matplotlib.pyplot as plt\n\n\n    TAIL = 1", 1)
+    template.write_text(text, encoding="utf-8")
+    main(["new", "Results", "fits", "--marimo", "--backend", "plotly"])
+    out = (marimo_repo / "notebooks" / "Results" / "fits.py").read_text(encoding="utf-8")
+    assert "TAIL" not in out and "plt" not in out
+    assert out.count("@app.cell") == 9
+
+
+def test_new_marimo_never_overwrites(marimo_repo):
+    target = marimo_repo / "notebooks" / "Results" / "fits.py"
+    main(["new", "Results", "fits", "--marimo", "--backend", "plotly"])
+    target.write_text("# edited by hand\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="already exists"):
+        main(["new", "Results", "fits.py", "--marimo", "--backend", "plotly"])
+    assert target.read_text(encoding="utf-8") == "# edited by hand\n"
+
+
+def test_new_marimo_refuses_a_section_the_document_lacks(marimo_repo):
+    with pytest.raises(SystemExit, match="not found"):
+        main(["new", "Methods", "fits", "--marimo", "--backend", "plotly"])
+    assert not (marimo_repo / "notebooks" / "Methods").exists()
+
+
+def test_savers_key_a_marimo_app_by_its_stem(tmp_path):
+    config = tmp_path / "figures_config.toml"
+    config.write_text("[fits.figures]\noff = false\n", encoding="utf-8")
+    save_fig, _ = notebook_savers(section=str(tmp_path), notebook="fits.py", config_path=config)
+    assert save_fig(object(), "off.png") is None  # switched off under [fits], not [fits.py]

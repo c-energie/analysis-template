@@ -1,42 +1,19 @@
-"""Common notebook setup: consistent working directory, styled figures, one import line.
+"""Compatibility shim: notebooks written as `from setup_notebook import ROOT` keep working.
 
-Importing this chdir's into the **repository root**. Nothing in this template strictly
-requires that — the config and manifest paths are absolute — but it makes every notebook
-behave the same regardless of what launched it, which the moment you add a tool resolving
-anything relative to the working directory stops being cosmetic. JupyterLab and VS Code
-start a kernel in the notebook's own directory; PyCharm starts it in the project root.
+The setup lives in the package now — `doc_analysis.notebook_setup()` — because a file
+found by walking up from the working directory is not found when the kernel starts at a
+workspace root. New notebooks call the function directly; this module only keeps the old
+import line meaningful, and adds nothing of its own so the two cannot drift.
 
     from setup_notebook import ROOT
-
-Backend-agnostic on purpose: this is the first thing every notebook imports, so an
-unconditional `import plotly` here would make the matplotlib extra unusable. Importing
-doc_analysis styles whichever backend you installed.
 """
 
-import os
-from importlib.util import find_spec
-from pathlib import Path
+from doc_analysis import notebook_setup
 
-# Registers the shared plotly template and/or the matplotlib rcParams as the default for
-# every notebook, on import — whichever extra is installed.
-import doc_analysis  # noqa: F401
-
-ROOT = Path(__file__).resolve().parents[1]
-
-os.chdir(ROOT)
-
-if find_spec("plotly") is not None:
-    import plotly.io as pio
-
-    # "notebook" renders in both JupyterLab and VS Code; "jupyterlab" is fine if you
-    # only ever use the former.
-    pio.renderers.default = "notebook"
+ROOT = notebook_setup()
 
 # --- your analysis stack ------------------------------------------------------------
-# If your data lives behind a package of your own, import it here so every notebook gets
-# it from one place and the seam is obvious:
-#
-#     from your_analysis_package import Cohort   # noqa: E402
-#
-# Keep it out of doc_analysis itself: the tooling stays reusable precisely because it
-# does not import your data layer.
+# If your data lives behind a package of your own, import it from the notebooks (or a
+# helper module in notebooks/, which notebook_setup() puts on sys.path), never from
+# doc_analysis itself: the tooling stays reusable precisely because it does not import
+# your data layer.
