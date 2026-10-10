@@ -86,3 +86,17 @@ This is then the unfilled template: the distribution name and author in `pyproje
 are still placeholder tokens. **Do not run `init.py`** — it belongs to a repo created from
 this one via GitHub's "Use this template", it prompts for answers, and it deletes itself
 when done. In a downstream repo it has already run and this section no longer applies.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on this repo, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels, each named for its role: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
