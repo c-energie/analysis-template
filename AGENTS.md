@@ -20,9 +20,13 @@ appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
   `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the checkout the
   package is installed from. So a notebook on the wrong interpreter can read *another*
   checkout's `.env`; check `document_repo()`, not just that it is set. A `.env` never
-  overrides an explicit export. Last of all, a `layout.toml` declaring
+  overrides an explicit export. Then a `layout.toml` declaring
   `analysis-hosts-writing` (`src/doc_analysis/layout.py`) puts it at
-  `<root>/<nested_dir>`; a `DOC_REPO` that disagrees still wins, with a warning.
+  `<root>/<nested_dir>`. Last of all, if this checkout's parent has a `layout.toml`
+  declaring `writing-hosts-analysis` with `nested_dir` equal to this checkout's directory
+  name, `DOC_REPO` *is that parent* — so a checkout nested in a document writes into it
+  with no `.env` at all. A `DOC_REPO` that disagrees with either layout still wins, with a
+  warning.
 - **Never set `DOC_REPO` in a shell profile.** The moment there is a second document it
   points at the wrong one, and the failure is silent — figures land in another document.
 - For tests and exploratory runs, don't point `DOC_REPO` at a real document. `section=`

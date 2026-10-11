@@ -1,4 +1,4 @@
-"""Read `layout.toml`: where the document repo sits when this repo hosts it.
+"""Read `layout.toml`: where the document repo sits in a nested layout, either side up.
 
 In the nested layout (`analysis-hosts-writing`) the document repo is a separate repo
 cloned into a gitignored subdirectory of this one, and the committed `layout.toml` says
@@ -19,7 +19,14 @@ is reached from the root, from `notebooks/` and from inside the nested repo itse
 for a notebook that called `notebook_setup()`, the checkout the package is installed from.
 
 `setup_nested.py` writes the file and cannot import this package (it runs before the
-install), so it carries its own reader. Keep the two in step: the keys and the values of
+install), so it carries its own reader.
+
+The same contract read from the other side is the last fallback: when this repo is the
+nested repo, cloned into a document repo whose own `layout.toml` declares
+`writing-hosts-analysis` and names this repo's directory as its `nested_dir`, the document
+repo is simply the parent directory (`find_host_layout`). One parent, never further: a
+file two levels up describes some other nesting, not this one. See
+docs/adr/0002-doc-repo-from-host-layout.md. Keep the two in step: the keys and the values of
 `layout` are a contract shared, mirrored, with writing-template's `writing-hosts-analysis`.
 
 Stdlib only (`tomllib`).
@@ -29,12 +36,15 @@ import tomllib
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import NamedTuple
 
+from doc_analysis.env import CHECKOUT_MARKER
+
 LAYOUT_FILENAME = "layout.toml"
 
-#: This repo hosts the document repo. The only layout this module resolves.
+#: This repo hosts the document repo: `find_layout` resolves it to `<root>/<nested_dir>`.
 HOSTS_WRITING = "analysis-hosts-writing"
 #: The document repo hosts this one — writing-template's side of the same contract. A
-#: file declaring it belongs to the document repo, so the search walks past it.
+#: file declaring it belongs to the document repo, so `find_layout` walks past it; only
+#: `find_host_layout`, looking one directory above this repo's root, reads it.
 HOSTED_BY_WRITING = "writing-hosts-analysis"
 LAYOUTS = (HOSTS_WRITING, HOSTED_BY_WRITING)
 
@@ -111,3 +121,46 @@ def find_layout(start=None, fallback=None):
             if layout.layout == HOSTS_WRITING:
                 return layout
     return None
+
+
+class HostLayout(NamedTuple):
+    """A host repo's `layout.toml` one directory above `root`, this repo's root."""
+    layout: Layout
+    root: Path
+
+    @property
+    def matches(self):
+        # Compared as paths, so `nested_dir = "x/"` still names the directory `x`. A
+        # nested_dir naming some other directory means the host nests a different repo
+        # (or this one was renamed): the parent is then not known to be our document.
+        return Path(self.layout.nested_dir) == Path(self.root.name)
+
+
+def find_host_layout(start=None, fallback=None):
+    """The host repo's `writing-hosts-analysis` layout one level above this repo, or None.
+
+    This repo's root is the nearest directory above `start` (default: the cwd) holding a
+    `pyproject.toml` — which reaches it from the root and from `notebooks/` — then
+    `fallback`, the installed checkout `notebook_setup()` records, for a kernel started
+    outside the repo. Only the parent of that root is looked at.
+
+    A layout whose `nested_dir` names another directory is still returned, with `matches`
+    false, so the "DOC_REPO is not set" error can name both names; one that matches wins
+    over one that does not.
+    """
+    base = Path(start).resolve() if start else Path.cwd().resolve()
+    roots = [directory for directory in (base, *base.parents)
+             if (directory / CHECKOUT_MARKER).is_file()][:1]
+    if fallback is not None:
+        roots.append(Path(fallback).resolve())
+
+    found = []
+    for root in roots:
+        candidate = root.parent / LAYOUT_FILENAME
+        # root.parent == root only at a filesystem root, which hosts nothing.
+        if root.parent == root or not candidate.is_file():
+            continue
+        layout = read_layout(candidate)
+        if layout.layout == HOSTED_BY_WRITING:
+            found.append(HostLayout(layout, root))
+    return next((host for host in found if host.matches), found[0] if found else None)

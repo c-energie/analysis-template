@@ -13,7 +13,10 @@ anything left out takes its default or, if it is required, stops the script.
 
 One question is whether to nest the document repo inside this one (`--nest`). Yes hands
 over to `setup_nested.py`, which creates it in a gitignored subdirectory and records it in
-`layout.toml`; no `DOC_REPO` path is asked for then.
+`layout.toml`; no `DOC_REPO` path is asked for then. Nor is it when this repo is already
+the nested one — cloned into a document repo whose `layout.toml` declares
+`writing-hosts-analysis` and names this directory: `doc_analysis` finds the document as
+the parent, so there is nothing to write (`--doc-repo` still writes `.env` if you insist).
 
 The **import package stays `doc_analysis`**, deliberately. Only the distribution name in
 `pyproject.toml` is yours to choose: renaming the package directory would rewrite every
@@ -41,6 +44,9 @@ OWN_TEST = ROOT / "tests" / "test_init.py"
 # Stays after init.py is gone: a fresh clone of a nested layout runs it to restore.
 SETUP_NESTED = ROOT / "setup_nested.py"
 LAYOUT_FILE = ROOT / "layout.toml"
+# The document repo's layout.toml, when it hosts this one. Its side of the contract.
+HOST_LAYOUT_FILE = ROOT.parent / "layout.toml"
+HOSTED_BY_WRITING = "writing-hosts-analysis"
 
 SUFFIXES = {".py", ".toml", ".md", ".ipynb", ".cfg", ".txt"}
 SKIP_DIRS = {".git", ".github", ".venv", "build", "dist", "__pycache__"}
@@ -149,6 +155,25 @@ def nested_dir():
     return (ROOT / name).resolve() if isinstance(name, str) and name.strip() else None
 
 
+def host_doc_repo():
+    """The parent directory, when its layout.toml nests this repo there; else None.
+
+    The same rule doc_analysis.layout.find_host_layout applies at runtime — this script
+    runs before the install, so it cannot import it. Read leniently: a host file that
+    does not parse only means the question is asked as before, and doc_analysis reports
+    the file properly the first time it reads it.
+    """
+    try:
+        data = tomllib.loads(HOST_LAYOUT_FILE.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    name = data.get("nested_dir")
+    if data.get("layout") != HOSTED_BY_WRITING or not isinstance(name, str) \
+            or not name.strip() or Path(name) != Path(ROOT.name):
+        return None
+    return ROOT.parent
+
+
 def files():
     # Pruned while walking, not filtered after: a nested repo is somebody else's history,
     # and a <<…>> token in its files — a writing-template placeholder, say — is not ours
@@ -215,12 +240,17 @@ def main(argv=None):
         validator=VALID_DISTRIBUTION.match, hint=DISTRIBUTION_HINT)
     author = args.author or ask("Author")
     nested = args.nest
-    if not nested and args.doc_repo is None and interactive:
+    # Already nested in a document repo: its layout.toml locates it, every clone alike, so
+    # asking for an absolute path would only plant a .env that goes stale on a move.
+    host = None if nested or args.doc_repo is not None else host_doc_repo()
+    if host is not None:
+        print(f"DOC_REPO: {host} (from host layout.toml)")
+    elif not nested and args.doc_repo is None and interactive:
         nested = ask("Nest the document inside this repo? [y/N]", required=False,
                      validator=lambda answer: answer.lower() in ("y", "yes", "n", "no"),
                      hint="y or n.").lower() in ("y", "yes")
     doc_repo = args.doc_repo
-    if doc_repo is None and not nested:
+    if doc_repo is None and not nested and host is None:
         doc_repo = ask("Path to your document repo (blank to set DOC_REPO later)",
                        required=False) if interactive else ""
 
@@ -255,6 +285,9 @@ def main(argv=None):
         print("\nDOC_REPO needs no .env: doc_analysis reads it from layout.toml.")
     elif doc_repo:
         write_env(doc_repo)
+    elif host is not None:
+        print("\nDOC_REPO needs no .env: doc_analysis reads it from the host repo's "
+              "layout.toml.")
     else:
         print("\nNext, copy .env.example to .env and point DOC_REPO at your document repo.")
 

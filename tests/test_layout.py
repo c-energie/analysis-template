@@ -11,7 +11,7 @@ import pytest
 
 from doc_analysis import env
 from doc_analysis.env import load_env
-from doc_analysis.layout import find_layout, read_layout
+from doc_analysis.layout import find_host_layout, find_layout, read_layout
 from doc_analysis.save_figure import document_repo
 
 LAYOUT = ('layout = "analysis-hosts-writing"\n'
@@ -137,3 +137,123 @@ def test_a_malformed_layout_is_an_error_naming_the_problem(host, text, complaint
     (host / "layout.toml").write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match=complaint):
         read_layout(host / "layout.toml")
+
+
+# Layout 3a: the other way up. The document repo is the host repo, and this repo is the
+# nested repo inside it; the host's layout.toml names this repo's directory.
+
+HOST_LAYOUT = 'layout = "writing-hosts-analysis"\nnested_dir = "my-thesis-analysis"\n'
+
+
+@pytest.fixture
+def hosted(tmp_path, monkeypatch):
+    """`<tmp>/my-thesis` (document, layout.toml) holding `my-thesis-analysis` (this repo)."""
+    document = (tmp_path / "my-thesis").resolve()
+    (document / "Sections" / "Results").mkdir(parents=True)
+    (document / "layout.toml").write_text(HOST_LAYOUT, encoding="utf-8")
+    analysis = document / "my-thesis-analysis"
+    (analysis / "notebooks").mkdir(parents=True)
+    (analysis / "pyproject.toml").write_text("[project]\nname = \"x\"\n", encoding="utf-8")
+
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    for name in ("DOC_REPO", "DOC_ENV"):
+        os.environ.pop(name, None)
+    monkeypatch.setitem(env.LAST_SEARCH, "fallback", None)
+    monkeypatch.chdir(analysis)
+    return document
+
+
+@pytest.mark.parametrize("where", ["", "notebooks"])
+def test_the_host_layout_makes_the_parent_the_document_from_root_and_notebooks(hosted,
+                                                                                where):
+    """No env, no .env, no layout.toml of our own: an absolute DOC_REPO in .env is what
+    ADR 0001 rejected, so the host's committed file is the only place left to say it."""
+    os.chdir(hosted / "my-thesis-analysis" / where)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert document_repo() == hosted
+
+
+def test_a_kernel_started_in_the_host_finds_this_repo_through_the_checkout_fallback(
+        hosted):
+    """From the document's own directory the upward search never enters this repo, so its
+    root comes from the installed checkout notebook_setup() records."""
+    os.chdir(hosted)
+    with pytest.raises(RuntimeError, match="DOC_REPO is not set"):
+        document_repo()
+    env.LAST_SEARCH["fallback"] = hosted / "my-thesis-analysis"
+    assert document_repo() == hosted
+
+
+def test_a_renamed_nested_checkout_gets_no_fallback_and_the_error_names_both(hosted):
+    """A host naming another directory nests some other repo, or this one was renamed;
+    guessing the parent then could write figures into a document that is not ours."""
+    renamed = hosted / "thesis-analysis-old"
+    (hosted / "my-thesis-analysis").rename(renamed)
+    os.chdir(renamed)
+    with pytest.raises(RuntimeError, match="DOC_REPO is not set") as raised:
+        document_repo()
+    message = str(raised.value)
+    assert "'my-thesis-analysis'" in message and "'thesis-analysis-old'" in message
+
+
+@pytest.mark.parametrize("how", ["environment", "dotenv"])
+def test_env_and_dotenv_override_the_host_layout_and_warn_when_they_differ(
+        hosted, tmp_path, how):
+    other = tmp_path / "other-document"
+    (other / "Sections").mkdir(parents=True)
+    analysis = hosted / "my-thesis-analysis"
+    if how == "environment":
+        os.environ["DOC_REPO"] = str(other)
+    else:
+        (analysis / ".env").write_text(f'DOC_REPO="{other}"\n', encoding="utf-8")
+        load_env(start=analysis)
+    with pytest.warns(UserWarning) as caught:
+        assert document_repo() == other
+    message = str(caught[0].message)
+    assert str(other) in message and str(hosted / "layout.toml") in message
+
+
+@pytest.mark.parametrize("how", ["environment", "dotenv"])
+def test_env_and_dotenv_that_agree_with_the_host_layout_are_silent(hosted, how):
+    analysis = hosted / "my-thesis-analysis"
+    if how == "environment":
+        os.environ["DOC_REPO"] = str(hosted)
+    else:
+        (analysis / ".env").write_text(f'DOC_REPO="{hosted}"\n', encoding="utf-8")
+        load_env(start=analysis)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert document_repo() == hosted
+
+
+def test_a_parent_layout_of_any_other_kind_is_not_a_host(hosted):
+    """analysis-hosts-writing in the parent says the parent is an analysis repo hosting a
+    document — the contract's other half, which #7's upward search already owns. It must
+    not also make the parent this repo's document."""
+    (hosted / "layout.toml").write_text(
+        'layout = "analysis-hosts-writing"\nnested_dir = "my-thesis-analysis"\n',
+        encoding="utf-8")
+    assert find_host_layout() is None
+    assert find_host_layout(fallback=hosted / "my-thesis-analysis") is None
+
+
+def test_only_the_direct_parent_is_a_host(hosted):
+    """One level, never further: a layout.toml two directories up describes another
+    nesting, and walking to it would make any ancestor a candidate document."""
+    deeper = hosted / "my-thesis-analysis" / "inner"
+    (deeper / "notebooks").mkdir(parents=True)
+    (deeper / "pyproject.toml").write_text("[project]\nname = \"y\"\n", encoding="utf-8")
+    os.chdir(deeper / "notebooks")
+    with pytest.raises(RuntimeError, match="DOC_REPO is not set"):
+        document_repo()
+
+
+def test_this_repos_own_layout_wins_over_the_hosts(hosted):
+    """Its own layout.toml is the nearer, stricter statement (ADR 0001 before ADR 0002)."""
+    analysis = hosted / "my-thesis-analysis"
+    (analysis / "doc").mkdir()
+    (analysis / "doc" / "Sections").mkdir()
+    (analysis / "layout.toml").write_text(
+        'layout = "analysis-hosts-writing"\nnested_dir = "doc"\n', encoding="utf-8")
+    assert document_repo() == analysis / "doc"

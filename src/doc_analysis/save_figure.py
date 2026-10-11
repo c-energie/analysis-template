@@ -24,7 +24,7 @@ matplotlib figure is covered by both checks exactly as a plotly one is.
 
 The LaTeX repo is an input, located via the DOC_REPO environment variable (the
 same convention the publishing agent uses), else — in the nested layout — via the
-committed layout.toml. This package never hardcodes a user path.
+committed layout.toml, this repo's or, when this repo is the nested one, its host's. This package never hardcodes a user path.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from doc_analysis.env import LAST_SEARCH, describe_search
-from doc_analysis.layout import find_layout
+from doc_analysis.layout import find_host_layout, find_layout
 
 DOC_REPO_ENV = "DOC_REPO"
 HTML_DIR_ENV = "FIGURES_HTML_DIR"
@@ -60,26 +60,40 @@ ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
 
 
 def document_repo():
-    """Root of the LaTeX document repo, from $DOC_REPO, else from `layout.toml`.
+    """Root of the LaTeX document repo, from $DOC_REPO, else from a `layout.toml`.
 
     $DOC_REPO — a real environment variable, else `.env`'s — wins. Without it, a
     `layout.toml` declaring `analysis-hosts-writing` puts the document at
-    `<root>/<nested_dir>` (see layout.py). A $DOC_REPO that disagrees with the layout still
-    wins but warns: it is almost always a `.env` left over from before the nesting.
+    `<root>/<nested_dir>` (see layout.py). Last of all, when this repo is itself the
+    nested repo — its parent's `layout.toml` declares `writing-hosts-analysis` and names
+    this repo's directory — the document is that parent. A $DOC_REPO that disagrees with
+    either layout still wins but warns: it is almost always a `.env` left over from
+    before the nesting.
 
     Raises with an actionable message rather than guessing: writing a figure into the
     wrong tree would silently break the document build.
     """
     value = os.environ.get(DOC_REPO_ENV)
-    hosted = find_layout(fallback=LAST_SEARCH["fallback"])
+    fallback = LAST_SEARCH["fallback"]
+    hosted = find_layout(fallback=fallback)
+    # Only looked for when this repo hosts nothing: its own layout.toml is nearer, and
+    # the stricter-first precedence of ADR 0001 extends past it rather than around it.
+    host = find_host_layout(fallback=fallback) if hosted is None else None
+    if hosted is not None:
+        layout_file, layout_repo = hosted.file, hosted.nested_path
+    elif host is not None and host.matches:
+        layout_file, layout_repo = host.layout.file, host.layout.root
+    else:
+        layout_file = layout_repo = None
+
     if value:
         repo = Path(value)
-        if hosted is not None and repo.resolve() != hosted.nested_path.resolve():
-            warnings.warn(f"{DOC_REPO_ENV}={repo} overrides {hosted.file}, which puts the "
-                          f"document repo at {hosted.nested_path}.", stacklevel=2)
-    elif hosted is not None:
-        repo = hosted.nested_path
-        if not repo.is_dir():
+        if layout_repo is not None and repo.resolve() != layout_repo.resolve():
+            warnings.warn(f"{DOC_REPO_ENV}={repo} overrides {layout_file}, which puts the "
+                          f"document repo at {layout_repo}.", stacklevel=2)
+    elif layout_repo is not None:
+        repo = layout_repo
+        if hosted is not None and not repo.is_dir():
             # The normal state of a fresh clone: the nested repo is gitignored, so it
             # does not come with the host and has to be cloned in once.
             raise RuntimeError(
@@ -92,6 +106,13 @@ def document_repo():
         # Saying where it looked is what tells a notebook started from the wrong
         # directory apart from a .env that is genuinely missing the line.
         looked = "".join(f"\n  - {line}" for line in describe_search())
+        if host is not None:
+            # A renamed nested checkout: the host's layout.toml names another directory,
+            # so the parent is not known to be this repo's document. Both names, because
+            # the fix is renaming one of them to the other.
+            looked += (f"\n  - {host.layout.file} declares {host.layout.layout}, but its "
+                       f"nested_dir = {host.layout.nested_dir!r} is not this repo's "
+                       f"directory, {host.root.name!r}; rename one to match the other")
         raise RuntimeError(
             f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
             f"    {DOC_REPO_ENV}=/path/to/my-document\n"
@@ -100,7 +121,7 @@ def document_repo():
             + (f"\nWhere it looked:{looked}" if looked else "")
         )
     if section_root_name(repo) is None:
-        source = f"{DOC_REPO_ENV}={repo}" if value else f"{repo} (from {hosted.file})"
+        source = f"{DOC_REPO_ENV}={repo}" if value else f"{repo} (from {layout_file})"
         raise NotADirectoryError(
             f"{source} does not look like the document repo "
             f"(no {SECTIONS_DIRNAME}/ directory)."

@@ -173,8 +173,11 @@ it with no shell setup. The file used is `$DOC_ENV` if set, else the nearest `.e
 the working directory — and, for a notebook that has called `notebook_setup()`, this
 repo's own `.env` when neither found one, so a kernel started outside the repo still gets
 its `DOC_REPO`. In the [nested layout](#nesting-the-document-inside-this-repo), with neither
-setting it, `DOC_REPO` comes from `layout.toml`; one that disagrees with it still wins, and
-warns. **A variable already set in your shell wins**, which keeps CI and one-off
+setting it, `DOC_REPO` comes from `layout.toml`; and when this repo is itself nested
+inside the document repo — the parent's `layout.toml` declares `writing-hosts-analysis`
+and names this directory as `nested_dir` — it is that parent, so `init.py` asks for no
+path ([ADR 0002](docs/adr/0002-doc-repo-from-host-layout.md)). One that disagrees with
+either still wins, and warns. **A variable already set in your shell wins**, which keeps CI and one-off
 overrides working:
 
 ```bash
@@ -362,7 +365,7 @@ These are the ones worth knowing before you lose an afternoon.
 | Module | What it does |
 |---|---|
 | `env.py` | Reads a `.env` into the environment on import — `$DOC_ENV`, else the nearest above the cwd — without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
-| `layout.py` | Reads `layout.toml`, which in the nested layout puts the document repo at `<root>/<nested_dir>`: `document_repo()`'s last fallback. Stdlib `tomllib`. |
+| `layout.py` | Reads `layout.toml`, which in the nested layout puts the document repo at `<root>/<nested_dir>`, and — the other way up — the host document repo's, which makes the parent the document when it names this directory: `document_repo()`'s last two fallbacks. Stdlib `tomllib`. |
 | `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the installed checkout's `.env`, styles the backend, chdirs to the repo root. |
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |

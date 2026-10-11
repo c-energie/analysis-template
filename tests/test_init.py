@@ -181,3 +181,52 @@ def test_nest_and_doc_repo_are_alternatives(checkout):
     assert result.returncode != 0
     assert "--nest" in result.stderr and "--doc-repo" in result.stderr
     assert unchanged(checkout)
+
+
+@pytest.fixture
+def hosted_checkout(tmp_path):
+    """The checkout as the nested repo of a document repo (layout 3a): the host's
+    layout.toml declares writing-hosts-analysis and names this directory."""
+    document = tmp_path / "my-thesis"
+    document.mkdir()
+    (document / "layout.toml").write_text(
+        'layout = "writing-hosts-analysis"\nnested_dir = "my-thesis-analysis"\n',
+        encoding="utf-8")
+    analysis = document / "my-thesis-analysis"
+    analysis.mkdir()
+    for name in ("init.py", "setup_nested.py"):
+        (analysis / name).write_text((TEMPLATE / name).read_text(encoding="utf-8"),
+                                     encoding="utf-8")
+    (analysis / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    (analysis / "tests").mkdir()
+    (analysis / "tests" / "test_init.py").write_text(PYPROJECT, encoding="utf-8")
+    return analysis
+
+
+def test_inside_a_host_document_doc_repo_is_not_asked_and_no_env_is_written(
+        hosted_checkout):
+    """An absolute DOC_REPO in .env goes stale the moment the host moves, and the host's
+    committed layout.toml already says it — so there is nothing to ask or write."""
+    result = run_init(hosted_checkout, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert f"DOC_REPO: {hosted_checkout.parent} (from host layout.toml)" in result.stdout
+    assert "Path to your document repo" not in result.stdout
+    assert "copy .env.example to .env" not in result.stdout
+    assert not (hosted_checkout / ".env").exists()
+
+
+def test_inside_a_host_document_an_explicit_doc_repo_is_still_written(hosted_checkout):
+    result = run_init(hosted_checkout, "--distribution", "x-analysis", "--author", "A",
+                      "--doc-repo", "/p")
+    assert result.returncode == 0, result.stderr
+    assert "from host layout.toml" not in result.stdout
+    assert "DOC_REPO=/p\n" in (hosted_checkout / ".env").read_text(encoding="utf-8")
+
+
+def test_a_host_layout_naming_another_directory_is_not_this_repos_host(hosted_checkout):
+    """A renamed nested checkout: the parent is not known to be its document."""
+    renamed = hosted_checkout.rename(hosted_checkout.parent / "renamed-analysis")
+    result = run_init(renamed, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert "from host layout.toml" not in result.stdout
+    assert "copy .env.example to .env" in result.stdout
