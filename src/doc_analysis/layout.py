@@ -14,9 +14,10 @@ is committed rather than written into `.env` per clone — and a relative `DOC_R
 `.env` is no substitute, because it would resolve against the notebook's working
 directory. See docs/adr/0001-doc-repo-from-layout.md.
 
-The file is found the way `.env` is: the nearest one above the working directory, so it
-is reached from the root, from `notebooks/` and from inside the nested repo itself; then,
-for a notebook that called `notebook_setup()`, the checkout the package is installed from.
+The file is found nearly the way `.env` is: the nearest one above the working directory,
+but never above this repo's root, so it is reached from the root, from `notebooks/` and
+from inside the nested repo itself; then, for a notebook that called `notebook_setup()`,
+the checkout the package is installed from.
 
 `setup_nested.py` writes the file and cannot import this package (it runs before the
 install), so it carries its own reader.
@@ -100,19 +101,33 @@ def read_layout(path):
         if pure.is_absolute() or pure.anchor or ".." in pure.parts:
             raise ValueError(f"{path}: nested_dir = {nested_dir!r} must be a path inside "
                              f"the repo, relative to {path.parent}.")
+        # "." or "./" names the host itself: accepted here it would only fail later as
+        # "no Sections/", and setup_nested.py already refuses it.
+        if not pure.parts or pure.parts == (".",):
+            raise ValueError(f"{path}: nested_dir = {nested_dir!r} must name a "
+                             f"subdirectory of {path.parent}, not the repo itself.")
     return Layout(path, data["layout"], nested_dir, data.get("nested_remote"))
 
 
 def find_layout(start=None, fallback=None):
     """The nearest `layout.toml` declaring `analysis-hosts-writing`, or None.
 
-    Searched upward from `start` (default: the cwd), then in `fallback` — the checkout
+    Searched upward from `start` (default: the cwd) as far as this repo's root — the
+    nearest directory holding a `pyproject.toml` — then in `fallback`, the checkout
     `notebook_setup()` falls back to for `.env`, for the same reason: a kernel started
     beside the repo never walks into it. A file declaring the other side of the contract
     is walked past, not returned: it describes the document repo, not this one.
+
+    Never past the root: every file reached is parsed strictly, so a foreign
+    `layout.toml` higher up would otherwise fail every save, an exported `DOC_REPO`
+    included. Outside any checkout, only `fallback` is looked at, for the same reason.
     """
     base = Path(start).resolve() if start else Path.cwd().resolve()
-    candidates = [directory / LAYOUT_FILENAME for directory in (base, *base.parents)]
+    upward = (base, *base.parents)
+    root = next((i for i, directory in enumerate(upward)
+                 if (directory / CHECKOUT_MARKER).is_file()), None)
+    candidates = ([] if root is None
+                  else [directory / LAYOUT_FILENAME for directory in upward[:root + 1]])
     if fallback is not None:
         candidates.append(Path(fallback).resolve() / LAYOUT_FILENAME)
     for candidate in candidates:

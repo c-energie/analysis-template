@@ -24,6 +24,8 @@ def host(tmp_path, monkeypatch):
     root = (tmp_path / "my-study").resolve()
     (root / "notebooks").mkdir(parents=True)
     (root / "layout.toml").write_text(LAYOUT, encoding="utf-8")
+    # What makes it a checkout: the upward search for layout.toml stops here.
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
     nested = root / "my-study-writing"
     (nested / "Sections" / "Results").mkdir(parents=True)
 
@@ -123,12 +125,39 @@ def test_the_document_sides_layout_file_is_walked_past(host):
     assert document_repo() == host / "my-study-writing"
 
 
+def test_a_foreign_layout_above_the_checkout_is_never_read(host, tmp_path):
+    """Every layout.toml reached is parsed strictly, so one belonging to whatever sits
+    above a checkout with no layout of its own would fail every save, DOC_REPO or not.
+    Two levels up: the direct parent is the one place a host layout is looked for."""
+    checkout = tmp_path / "projects" / "plain-analysis"
+    (checkout / "notebooks").mkdir(parents=True)
+    (checkout / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    (tmp_path / "layout.toml").write_text(LAYOUT + 'other_tool = "x"\n', encoding="utf-8")
+    os.environ["DOC_REPO"] = str(host / "my-study-writing")
+    os.chdir(checkout / "notebooks")
+    assert document_repo() == host / "my-study-writing"
+
+
+def test_outside_any_checkout_a_foreign_layout_is_never_read(host, tmp_path):
+    """The reviewer's case: DOC_REPO exported, run from a directory that is no checkout,
+    under a layout.toml that is not ours. Only the installed checkout is looked at."""
+    (tmp_path / "layout.toml").write_text(LAYOUT + 'other_tool = "x"\n', encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    os.chdir(work)
+    assert find_layout() is None
+    os.environ["DOC_REPO"] = str(host / "my-study-writing")
+    assert document_repo() == host / "my-study-writing"
+
+
 @pytest.mark.parametrize("text, complaint", [
     (LAYOUT + 'nested_drr = "x"\n', "nested_drr"),
     ('layout = "analysis-hosts-writing"\n', "nested_dir"),
     ('layout = "side-by-side"\nnested_dir = "x"\n', "side-by-side"),
     ('layout = "analysis-hosts-writing"\nnested_dir = "/abs/doc"\n', "inside the repo"),
     ('layout = "analysis-hosts-writing"\nnested_dir = "../sibling"\n', "inside the repo"),
+    ('layout = "analysis-hosts-writing"\nnested_dir = "."\n', "subdirectory"),
+    ('layout = "analysis-hosts-writing"\nnested_dir = "./"\n', "subdirectory"),
     ('layout = "analysis-hosts-writing"\nnested_dir = 3\n', "non-empty string"),
     ("layout = \n", "not valid TOML"),
 ])
