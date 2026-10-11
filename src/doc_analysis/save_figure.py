@@ -23,7 +23,8 @@ guard figure sizes and to report which figures the document actually renders —
 matplotlib figure is covered by both checks exactly as a plotly one is.
 
 The LaTeX repo is an input, located via the DOC_REPO environment variable (the
-same convention the publishing agent uses) — this package never hardcodes a user path.
+same convention the publishing agent uses), else — in the nested layout — via the
+committed layout.toml. This package never hardcodes a user path.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
@@ -38,7 +39,8 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from doc_analysis.env import describe_search
+from doc_analysis.env import LAST_SEARCH, describe_search
+from doc_analysis.layout import find_layout
 
 DOC_REPO_ENV = "DOC_REPO"
 HTML_DIR_ENV = "FIGURES_HTML_DIR"
@@ -58,13 +60,35 @@ ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
 
 
 def document_repo():
-    """Root of the LaTeX document repo, from $DOC_REPO.
+    """Root of the LaTeX document repo, from $DOC_REPO, else from `layout.toml`.
+
+    $DOC_REPO — a real environment variable, else `.env`'s — wins. Without it, a
+    `layout.toml` declaring `analysis-hosts-writing` puts the document at
+    `<root>/<nested_dir>` (see layout.py). A $DOC_REPO that disagrees with the layout still
+    wins but warns: it is almost always a `.env` left over from before the nesting.
 
     Raises with an actionable message rather than guessing: writing a figure into the
     wrong tree would silently break the document build.
     """
     value = os.environ.get(DOC_REPO_ENV)
-    if not value:
+    hosted = find_layout(fallback=LAST_SEARCH["fallback"])
+    if value:
+        repo = Path(value)
+        if hosted is not None and repo.resolve() != hosted.nested_path.resolve():
+            warnings.warn(f"{DOC_REPO_ENV}={repo} overrides {hosted.file}, which puts the "
+                          f"document repo at {hosted.nested_path}.", stacklevel=2)
+    elif hosted is not None:
+        repo = hosted.nested_path
+        if not repo.is_dir():
+            # The normal state of a fresh clone: the nested repo is gitignored, so it
+            # does not come with the host and has to be cloned in once.
+            raise RuntimeError(
+                f"{DOC_REPO_ENV} is not set, and {hosted.file} puts the document repo at "
+                f"{repo}, which does not exist. Clone it into place with\n"
+                f"    python setup_nested.py\n"
+                f"run in {hosted.root}."
+            )
+    else:
         # Saying where it looked is what tells a notebook started from the wrong
         # directory apart from a .env that is genuinely missing the line.
         looked = "".join(f"\n  - {line}" for line in describe_search())
@@ -75,10 +99,10 @@ def document_repo():
             f"{SECTIONS_DIRNAME}/."
             + (f"\nWhere it looked:{looked}" if looked else "")
         )
-    repo = Path(value)
     if section_root_name(repo) is None:
+        source = f"{DOC_REPO_ENV}={repo}" if value else f"{repo} (from {hosted.file})"
         raise NotADirectoryError(
-            f"{DOC_REPO_ENV}={repo} does not look like the document repo "
+            f"{source} does not look like the document repo "
             f"(no {SECTIONS_DIRNAME}/ directory)."
         )
     return repo

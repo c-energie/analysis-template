@@ -75,6 +75,11 @@ notebook-skeleton = "doc_analysis.notebook_skeleton:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+# Only tests/. In the nested layout the document repo is a subdirectory of this one, and
+# a bare `pytest` would otherwise collect whatever test-shaped files it holds.
+testpaths = ["tests"]
+
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
