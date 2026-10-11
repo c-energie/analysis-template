@@ -178,6 +178,15 @@ def test_retrofit_cannot_check_a_savers_call_it_cannot_parse(repo, capsys):
     assert "[unparsed]" in capsys.readouterr().out
 
 
+def test_retrofit_does_not_take_a_continuation_line_for_a_magic(repo, capsys):
+    """A clean cell whose continuation line opens with `!=` was failed as [unparsed]."""
+    assert retrofit(repo, 'save_fig, save_table = notebook_savers(section=SECTION,\n'
+                          '    notebook=NOTEBOOK)\n'
+                          'changed = (old\n'
+                          '           != new)\n') == 0
+    assert "nothing to graft" in capsys.readouterr().out
+
+
 def test_retrofit_leaves_notebooks_outside_the_repo_alone(repo, tmp_path):
     original = tmp_path / "old_repo" / "notebooks" / "fits.ipynb"
     legacy_notebook(original)

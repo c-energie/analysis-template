@@ -74,11 +74,15 @@ def _parse_cell(text):
     """The cell's syntax tree, or None for a cell magic or code ast cannot read."""
     if text.lstrip().startswith("%%"):
         return None
-    try:
-        return ast.parse("\n".join("" if MAGIC_LINE.match(line) else line
-                                   for line in text.splitlines()))
-    except SyntaxError:
-        return None
+    # Plain Python first: a continuation line opening with `!=` or `%` looks like a magic,
+    # and blanking it would turn a clean cell into an [unparsed] failure.
+    for source in (text, "\n".join("" if MAGIC_LINE.match(line) else line
+                                   for line in text.splitlines())):
+        try:
+            return ast.parse(source)
+        except SyntaxError:
+            pass
+    return None
 
 
 def _called_name(node):
