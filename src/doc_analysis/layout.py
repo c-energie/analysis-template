@@ -175,7 +175,14 @@ def find_host_layout(start=None, fallback=None):
         # root.parent == root only at a filesystem root, which hosts nothing.
         if root.parent == root or not candidate.is_file():
             continue
-        layout = read_layout(candidate)
-        if layout.layout == HOSTED_BY_WRITING:
-            found.append(HostLayout(layout, root))
+        # The parent is whatever directory the checkout was cloned into, so its
+        # layout.toml is usually not ours: parsed strictly, a foreign one would fail every
+        # save, an exported DOC_REPO included. Only a file declaring this side of the
+        # contract is held to it.
+        try:
+            declared = tomllib.loads(candidate.read_text(encoding="utf-8")).get("layout")
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        if declared == HOSTED_BY_WRITING:
+            found.append(HostLayout(read_layout(candidate), root))
     return next((host for host in found if host.matches), found[0] if found else None)

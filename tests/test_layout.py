@@ -267,6 +267,29 @@ def test_a_parent_layout_of_any_other_kind_is_not_a_host(hosted):
     assert find_host_layout(fallback=hosted / "my-thesis-analysis") is None
 
 
+@pytest.mark.parametrize("text", ['title = "some other tool"\n', "not = [toml\n",
+                                  'layout = "analysis-hosts-writing"\nnested_dir = "x"\n'
+                                  'other_tool = "x"\n'])
+def test_a_foreign_layout_in_the_parent_is_never_held_to_the_contract(hosted, tmp_path,
+                                                                     text):
+    """The parent is whatever the checkout was cloned into. Its layout.toml is only ours to
+    parse strictly when it declares writing-hosts-analysis; otherwise it would fail every
+    save, an exported DOC_REPO included — what stopping find_layout at the root fixed."""
+    (hosted / "layout.toml").write_text(text, encoding="utf-8")
+    other = tmp_path / "other-document"
+    (other / "Sections").mkdir(parents=True)
+    os.environ["DOC_REPO"] = str(other)
+    os.chdir(hosted / "my-thesis-analysis" / "notebooks")
+    assert document_repo() == other
+
+
+def test_a_host_layout_with_an_unknown_key_is_still_an_error(hosted):
+    (hosted / "layout.toml").write_text(HOST_LAYOUT + 'nested_remot = "x"\n',
+                                        encoding="utf-8")
+    with pytest.raises(ValueError, match="nested_remot"):
+        document_repo()
+
+
 def test_only_the_direct_parent_is_a_host(hosted):
     """One level, never further: a layout.toml two directories up describes another
     nesting, and walking to it would make any ancestor a candidate document."""
