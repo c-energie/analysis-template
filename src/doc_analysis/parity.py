@@ -17,10 +17,18 @@ everything saved against the section sources. A figure whose `\\begin{figure}` b
 never written, or is still commented out, passes every other check and is invisible in the
 PDF. That mode is a report, not a gate, and always exits 0.
 
+**What retires a figure?** The manifest is only ever added to, one entry per save, so a
+figure whose PNG was deleted keeps its entry for good: `--snapshot` reports it as skipped
+on every run and `--figures` lists it as unreferenced. `--prune` removes those entries and
+their interactive HTML. It is explicit rather than part of a snapshot because a PNG can
+also be missing transiently — a document checkout on the wrong branch — and dropping the
+entry then would lose its record until the notebook is re-run.
+
 Usage:
     check-figure-parity --snapshot                  # record the current dimensions
     check-figure-parity [--tolerance 0.05] [--stems stem1 stem2 ...]
     check-figure-parity --figures
+    check-figure-parity --prune [--dry-run]         # drop entries whose PNG is gone
 """
 
 import argparse
@@ -70,11 +78,12 @@ def snapshot(document_repo, html_dir=None, baseline_path=BASELINE_PATH):
         return 1
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    baseline, missing = {}, []
+    baseline, missing, stale = {}, [], False
     for entry in manifest.values():
         static = Path(entry["static"])
         if not static.exists():
             missing.append(str(static))
+            stale = True
             continue
         width, height = png_size(static)
         try:
@@ -93,6 +102,64 @@ def snapshot(document_repo, html_dir=None, baseline_path=BASELINE_PATH):
     print(f"Wrote {len(baseline)} figure(s) to {baseline_path}")
     for line in missing:
         print(f"  skipped: {line}")
+    # Without the hint a retired figure is reported as skipped on every run, and the only
+    # visible fix is editing the manifest by hand. The outside-the-repo case gets no hint:
+    # --prune deliberately leaves those entries alone.
+    if stale:
+        print("  A skipped figure whose PNG was deleted stays in the manifest until "
+              "`check-figure-parity --prune` removes it.")
+    return 0
+
+
+def prune(html_dir=None, dry_run=False):
+    """Remove manifest entries whose static PNG no longer exists, with their HTML.
+
+    Deletes nothing but the entry and that entry's own interactive HTML: never a PNG, a
+    notebook, the baseline or anything in the document repo, which is why this needs no
+    DOC_REPO. A missing PNG is the only reason an entry goes; one that merely lies
+    outside the document repo is a configuration question, not a retired figure.
+    """
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    manifest_path = html_dir / MANIFEST_NAME
+    if not manifest_path.exists():
+        print(f"No manifest at {manifest_path}; nothing to prune.")
+        return 0
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stale = sorted(key for key, entry in manifest.items()
+                   if not Path(entry["static"]).exists())
+    if not stale:
+        print(f"No stale entries in {manifest_path}; nothing changed.")
+        return 0
+
+    verb = "would prune" if dry_run else "pruned"
+    pruned = {key: manifest.pop(key) for key in stale}
+    # The HTML is named by stem alone, so a stem re-saved elsewhere under another label
+    # shares it with the retired entry; deleting it then would break the live figure.
+    live_html = {entry.get("interactive") for entry in manifest.values()}
+    for key, entry in pruned.items():
+        # `interactive` is relative to the manifest file (the publishing engine resolves
+        # it the same way), and null for a matplotlib figure, which has no HTML.
+        interactive = entry.get("interactive")
+        html = (manifest_path.parent / interactive
+                if interactive and interactive not in live_html else None)
+        if html is not None and html.is_file():
+            if not dry_run:
+                html.unlink()
+            print(f"  {verb}: {key}  (and {html})")
+        else:
+            print(f"  {verb}: {key}")
+
+    if dry_run:
+        print(f"{len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} in "
+              f"{manifest_path}; nothing written (--dry-run).")
+        return 0
+    # Same format as the savers' _update_manifest, so the next save's rewrite is the
+    # only diff it produces.
+    manifest_path.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n",
+                             encoding="utf-8")
+    print(f"Pruned {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} "
+          f"from {manifest_path}")
     return 0
 
 
@@ -187,11 +254,13 @@ def check_figures_placed(document_repo, html_dir=None):
     return 0
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--document-repo", type=Path, default=None,
                         help="LaTeX document repo root (default: the DOC_REPO env var)")
-    parser.add_argument("--tolerance", type=float, default=0.05,
+    # Default None, not 0.05, so that an explicit --tolerance can be told apart and
+    # rejected alongside --prune; check() still gets 0.05.
+    parser.add_argument("--tolerance", type=float, default=None,
                         help="Max fractional drift in width/height/aspect (default 0.05)")
     parser.add_argument("--stems", nargs="*", default=None,
                         help="Only check these figure stems (default: all in the baseline)")
@@ -202,17 +271,38 @@ def main():
     parser.add_argument("--snapshot", action="store_true",
                         help="Record the current dimensions of every saved figure as the "
                              "baseline, instead of checking against it")
+    parser.add_argument("--prune", action="store_true",
+                        help="Remove manifest entries whose static PNG no longer exists, "
+                             "and their interactive HTML; touches nothing else")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="With --prune: report what would be pruned, change nothing")
     parser.add_argument("--html-dir", type=Path, default=None,
-                        help="Directory holding figures_manifest.json (--figures and "
-                             "--snapshot only; default: $FIGURES_HTML_DIR, else the "
-                             "repo's figures_html/)")
-    args = parser.parse_args()
+                        help="Directory holding figures_manifest.json (--figures, "
+                             "--snapshot and --prune only; default: $FIGURES_HTML_DIR, "
+                             "else the repo's figures_html/)")
+    args = parser.parse_args(argv)
+    # Checked by hand rather than with a mutually exclusive group, which would also
+    # start rejecting combinations of the existing modes that have always been accepted.
+    if args.prune:
+        clashing = [flag for flag, given in (("--snapshot", args.snapshot),
+                                             ("--figures", args.figures),
+                                             ("--stems", args.stems is not None),
+                                             ("--tolerance", args.tolerance is not None))
+                    if given]
+        if clashing:
+            parser.error(f"--prune cannot be combined with {', '.join(clashing)}")
+        # Before the document repo is resolved: pruning never reads it, so it must not
+        # fail for want of a DOC_REPO.
+        sys.exit(prune(args.html_dir, dry_run=args.dry_run))
+    if args.dry_run:
+        parser.error("--dry-run is only valid with --prune")
     repo = args.document_repo if args.document_repo is not None else resolve_document_repo()
     if args.snapshot:
         sys.exit(snapshot(repo, args.html_dir))
     if args.figures:
         sys.exit(check_figures_placed(repo, args.html_dir))
-    sys.exit(check(repo, args.tolerance, args.stems))
+    tolerance = 0.05 if args.tolerance is None else args.tolerance
+    sys.exit(check(repo, tolerance, args.stems))
 
 
 if __name__ == "__main__":

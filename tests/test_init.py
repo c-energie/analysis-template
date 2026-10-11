@@ -4,6 +4,7 @@ Each test runs a copy of init.py in a throwaway copy of the files it rewrites, s
 real template is never touched and the script's self-deletion is harmless. A downstream
 repo has no init.py — it deleted itself — so there these tests have nothing to test.
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import pytest
 
 TEMPLATE = Path(__file__).resolve().parents[1]
 INIT = TEMPLATE / "init.py"
+SETUP_NESTED = TEMPLATE / "setup_nested.py"
 
 pytestmark = pytest.mark.skipif(not INIT.exists(), reason="init.py has already run")
 
@@ -22,18 +24,37 @@ PYPROJECT = '[project]\nname = "PACKAGE-NAME"\nauthors = [{ name = "<<AUTHOR>>" 
 @pytest.fixture
 def checkout(tmp_path):
     (tmp_path / "init.py").write_text(INIT.read_text(encoding="utf-8"), encoding="utf-8")
+    # --nest runs it; it stays behind when init.py deletes itself.
+    (tmp_path / "setup_nested.py").write_text(SETUP_NESTED.read_text(encoding="utf-8"),
+                                              encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_init.py").write_text(PYPROJECT, encoding="utf-8")
     return tmp_path
 
 
-def run_init(checkout, *flags):
+def run_init(checkout, *flags, env=None):
     # stdin=DEVNULL: not a TTY, so nothing may be prompted for. PYTHONIOENCODING, as
     # setup sets it: init.py prints em dashes, which the Windows code page cannot encode.
     return subprocess.run([sys.executable, "init.py", *flags], cwd=checkout,
                           stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
-                          env=os.environ | {"PYTHONIOENCODING": "utf-8"})
+                          env=(env or os.environ) | {"PYTHONIOENCODING": "utf-8"})
+
+
+def nested_repo(directory):
+    """A stand-in nested document repo: its own .git, and files full of tokens that are
+    writing-template's or its author's, not ours to fill."""
+    (directory / ".git").mkdir(parents=True)
+    (directory / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (directory / "README.md").write_text("# PACKAGE-NAME by <<AUTHOR>>\n", encoding="utf-8")
+    (directory / "notes").mkdir()
+    (directory / "notes" / "setup.py").write_text("NAME = 'PACKAGE-NAME'\n", encoding="utf-8")
+    return directory
+
+
+def snapshot(directory):
+    return {path.relative_to(directory).as_posix(): path.read_bytes()
+            for path in sorted(directory.rglob("*")) if path.is_file()}
 
 
 def unchanged(checkout):
@@ -113,3 +134,116 @@ def test_already_initialised_wins_over_missing_flags(checkout):
     assert result.returncode == 1
     assert "already been initialised" in result.stdout
     assert "--author" not in result.stderr
+
+
+def test_nest_leaves_a_nested_repo_byte_for_byte_unchanged(checkout):
+    """The placeholder pass used to walk everything under the root — a nested document
+    repo included — and would have rewritten its <<…>> tokens as if they were ours."""
+    nested = nested_repo(checkout / "doc-writing")
+    (checkout / "layout.toml").write_text(
+        'layout = "analysis-hosts-writing"\nnested_dir = "doc-writing"\n'
+        'nested_remote = "https://example.invalid/doc-writing.git"\n', encoding="utf-8")
+    before = snapshot(nested)
+
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest")
+    assert result.returncode == 0, result.stderr
+    assert snapshot(nested) == before
+    assert 'name = "x-analysis"' in (checkout / "pyproject.toml").read_text(encoding="utf-8")
+    # Nested: DOC_REPO comes from layout.toml, so there is no path to ask for or write.
+    assert not (checkout / ".env").exists()
+    assert "Path to your document repo" not in result.stdout
+    assert (checkout / "setup_nested.py").exists()
+
+
+def test_any_subdirectory_with_its_own_git_is_skipped_without_a_layout(checkout):
+    """A repo cloned in by hand, before or without setup_nested.py, is just as foreign."""
+    nested = nested_repo(checkout / "cloned-by-hand")
+    before = snapshot(nested)
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert snapshot(nested) == before
+
+
+def test_nest_without_gh_stops_before_anything_is_rewritten(checkout, tmp_path):
+    """Nesting runs first, so a refusal leaves the template whole and init.py re-runnable."""
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest",
+                      env=os.environ | {"PATH": str(empty)})
+    assert result.returncode != 0
+    assert "gh auth login" in result.stderr
+    assert unchanged(checkout)
+    assert not (checkout / "layout.toml").exists()
+
+
+def test_nest_and_doc_repo_are_alternatives(checkout):
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest",
+                      "--doc-repo", "/p")
+    assert result.returncode != 0
+    assert "--nest" in result.stderr and "--doc-repo" in result.stderr
+    assert unchanged(checkout)
+
+
+@pytest.fixture
+def hosted_checkout(tmp_path):
+    """The checkout as the nested repo of a document repo (layout 3a): the host's
+    layout.toml declares writing-hosts-analysis and names this directory."""
+    document = tmp_path / "my-thesis"
+    document.mkdir()
+    (document / "layout.toml").write_text(
+        'layout = "writing-hosts-analysis"\nnested_dir = "my-thesis-analysis"\n',
+        encoding="utf-8")
+    analysis = document / "my-thesis-analysis"
+    analysis.mkdir()
+    for name in ("init.py", "setup_nested.py"):
+        (analysis / name).write_text((TEMPLATE / name).read_text(encoding="utf-8"),
+                                     encoding="utf-8")
+    (analysis / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    (analysis / "tests").mkdir()
+    (analysis / "tests" / "test_init.py").write_text(PYPROJECT, encoding="utf-8")
+    return analysis
+
+
+def test_inside_a_host_document_doc_repo_is_not_asked_and_no_env_is_written(
+        hosted_checkout):
+    """An absolute DOC_REPO in .env goes stale the moment the host moves, and the host's
+    committed layout.toml already says it — so there is nothing to ask or write."""
+    result = run_init(hosted_checkout, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert f"DOC_REPO: {hosted_checkout.parent} (from host layout.toml)" in result.stdout
+    assert "Path to your document repo" not in result.stdout
+    assert "copy .env.example to .env" not in result.stdout
+    assert not (hosted_checkout / ".env").exists()
+
+
+def test_inside_a_host_document_an_explicit_doc_repo_is_still_written(hosted_checkout):
+    result = run_init(hosted_checkout, "--distribution", "x-analysis", "--author", "A",
+                      "--doc-repo", "/p")
+    assert result.returncode == 0, result.stderr
+    assert "from host layout.toml" not in result.stdout
+    assert "DOC_REPO=/p\n" in (hosted_checkout / ".env").read_text(encoding="utf-8")
+
+
+def test_a_host_layout_naming_another_directory_is_not_this_repos_host(hosted_checkout):
+    """A renamed nested checkout: the parent is not known to be its document."""
+    renamed = hosted_checkout.rename(hosted_checkout.parent / "renamed-analysis")
+    result = run_init(renamed, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert "from host layout.toml" not in result.stdout
+    assert "copy .env.example to .env" in result.stdout
+
+
+def test_inside_a_host_document_a_person_at_a_terminal_is_not_asked_either(
+        hosted_checkout, monkeypatch):
+    """The subprocess runs above have no terminal, where nothing is ever asked; this is the
+    case the skip exists for. Asking a person here plants an absolute DOC_REPO in .env, or
+    offers to nest a second document inside a repo that is already nested in one."""
+    spec = importlib.util.spec_from_file_location("hosted_init", hosted_checkout / "init.py")
+    init = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(init)
+    asked = []
+    monkeypatch.setattr(init, "at_terminal", lambda: True)
+    monkeypatch.setattr(init, "ask", lambda prompt, **_: asked.append(prompt) or "")
+    init.main(["--distribution", "x-analysis", "--author", "A", "--backend", "plotly"])
+    assert asked == []
+    assert not (hosted_checkout / ".env").exists()

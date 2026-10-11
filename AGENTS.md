@@ -20,13 +20,29 @@ appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
   `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the checkout the
   package is installed from. So a notebook on the wrong interpreter can read *another*
   checkout's `.env`; check `document_repo()`, not just that it is set. A `.env` never
-  overrides an explicit export.
+  overrides an explicit export. Then a `layout.toml` declaring
+  `analysis-hosts-writing` (`src/doc_analysis/layout.py`) puts it at
+  `<root>/<nested_dir>`. Last of all, if this checkout's parent has a `layout.toml`
+  declaring `writing-hosts-analysis` with `nested_dir` equal to this checkout's directory
+  name, `DOC_REPO` *is that parent* — so a checkout nested in a document writes into it
+  with no `.env` at all. A `DOC_REPO` that disagrees with either layout still wins, with a
+  warning.
 - **Never set `DOC_REPO` in a shell profile.** The moment there is a second document it
   points at the wrong one, and the failure is silent — figures land in another document.
 - For tests and exploratory runs, don't point `DOC_REPO` at a real document. `section=`
   accepts an **absolute path**, and `html_dir=` is an argument, so a temp directory is
   enough: `save_document_figure(name, fig=fig, section=tmp_section, html_dir=tmp_html)`.
 - When you have saved something, report the *document* repo's diff, not this one's.
+
+### If `layout.toml` exists, `nested_dir` is a separate repo with its own remote: commit there, never here
+
+That is the nested layout: the document repo cloned into a gitignored subdirectory of this
+one by `setup_nested.py`. Its files are inside this directory tree but not in this repo's
+history — `git status` here will never show them, and `git add` here must never try. Run
+git for the document from inside `nested_dir`. Here, only `layout.toml` and the
+`.gitignore` line are committed. If `nested_dir` is missing (a fresh clone),
+`python setup_nested.py` restores it from `nested_remote`; it needs no arguments and does
+not prompt.
 
 ## Figures
 

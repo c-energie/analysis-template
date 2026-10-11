@@ -23,9 +23,15 @@ the document repo knows nothing about Python, and this package never reads your 
 This is a **GitHub template**, not a repository to fork or clone: the copy you run your
 analysis from is your own repository, with its own history and no link back here.
 
-**Do the document repository first.** This one asks for its path during setup, and every
-figure it writes lands there. If you have not created it yet, start at
-[writing-template](https://github.com/c-energie/writing-template) and come back.
+There are two layouts — how this repo and the document repo sit relative to each other:
+
+- **Side by side** (the default): two checkouts next to each other, each opened on its own.
+  **Do the document repository first.** This one asks for its path during setup, and every
+  figure it writes lands there. If you have not created it yet, start at
+  [writing-template](https://github.com/c-energie/writing-template) and come back.
+- **Nested**: this repo is the one you open, and the document repo lives inside it as a
+  separate, gitignored repo. Nothing needs creating first — see
+  [Nesting the document inside this repo](#nesting-the-document-inside-this-repo).
 
 **1. Create your repository.** On
 [c-energie/analysis-template](https://github.com/c-energie/analysis-template), press
@@ -41,13 +47,14 @@ cd <your-analysis>
 python init.py
 ```
 
-`init.py` asks four things — project name, author, the path to your document repo, and
-which plotting backend you want — then writes your `.env` and deletes itself. Run it once,
+`init.py` asks four things — project name, author, the path to your document repo (or
+whether to nest it here instead), and which plotting backend you want — then writes your
+`.env` and deletes itself. Run it once,
 in **your** repository; it edits in place and then removes itself, so it is not something
 to run in a checkout of the template. The path can be left blank and set later in `.env`.
 
 To run it unattended, pass the answers as flags instead — `--distribution`, `--author`,
-`--doc-repo` (optional) and `--backend` (default `plotly`); `python init.py --help` lists
+`--doc-repo` (optional) or `--nest`, and `--backend` (default `plotly`); `python init.py --help` lists
 them. A flag skips its question, and a bad value stops the script with the reason. With no
 terminal to ask on, a left-out `--distribution` or `--author` stops it too.
 
@@ -79,6 +86,50 @@ import it in notebooks, never from `src/` — see
 
 Setting all three repositories up for the first time? The end-to-end order lives in the
 document repo: [writing-template/SETUP.md](https://github.com/c-energie/writing-template/blob/main/SETUP.md).
+
+### Nesting the document inside this repo
+
+```
+my-study/               <- this repo (the host repo), the one you open
+├── layout.toml         <- committed: says where the document is and where it came from
+├── src/ notebooks/ ...
+└── my-study-writing/   <- the document repo: its own repo and remote, gitignored here
+```
+
+**Choose it** when the analysis is where you work and the document is its output — one
+folder to open, one place for an agent to start — and you do not need the document checked
+out without the analysis. Keep the two side by side when the document has a life of its own
+(co-authors who never run the analysis, several analysis repos feeding one document).
+
+**The one command**, run here after `init.py` (or answer yes to its "Nest the document
+inside this repo?", which runs it for you):
+
+```bash
+python setup_nested.py                     # creates it from writing-template (needs gh)
+python setup_nested.py --from <url|path>   # adopts an existing one: GitHub, Overleaf, local
+```
+
+Creating calls `gh repo create <owner>/<name> --template c-energie/writing-template
+--private --clone`; `--dir`, `--name`, `--owner` and `--public` change the defaults
+(`<this repo's name>-writing`, the same name, this repo's GitHub owner, private). Without a
+logged-in `gh` it stops before changing anything — run `gh auth login`, or create the repo
+yourself and use `--from`. Either way the script clones into the subdirectory, adds it to
+`.gitignore` and writes `layout.toml`. It does not write `.env`: `doc_analysis` reads
+`DOC_REPO` from `layout.toml`, so every clone works without one.
+
+**What to commit where.** Here: `layout.toml` and the `.gitignore` line, once. Everything
+in the document — including every figure and table this package writes — is committed
+*in the nested directory*, which is a separate repo with its own remote and history. `git
+status` here never shows it.
+
+**On a fresh clone** of this repo the nested directory is absent (it is gitignored). One
+command restores it from the `nested_remote` that `layout.toml` recorded:
+
+```bash
+python setup_nested.py
+```
+
+Until then, saving a figure raises with that command in the message.
 
 ## Choosing a backend
 
@@ -121,7 +172,12 @@ Loaded on import of `doc_analysis`, so notebooks, tests and the console scripts 
 it with no shell setup. The file used is `$DOC_ENV` if set, else the nearest `.env` above
 the working directory — and, for a notebook that has called `notebook_setup()`, this
 repo's own `.env` when neither found one, so a kernel started outside the repo still gets
-its `DOC_REPO`. **A variable already set in your shell wins**, which keeps CI and one-off
+its `DOC_REPO`. In the [nested layout](#nesting-the-document-inside-this-repo), with neither
+setting it, `DOC_REPO` comes from `layout.toml`; and when this repo is itself nested
+inside the document repo — the parent's `layout.toml` declares `writing-hosts-analysis`
+and names this directory as `nested_dir` — it is that parent, so `init.py` asks for no
+path ([ADR 0002](docs/adr/0002-doc-repo-from-host-layout.md)). One that disagrees with
+either still wins, and warns. **A variable already set in your shell wins**, which keeps CI and one-off
 overrides working:
 
 ```bash
@@ -274,6 +330,7 @@ that is the whole point, that turning one artefact off never means editing a not
 ```bash
 check-figure-parity --snapshot   # record current figure dimensions as the baseline
 check-figure-parity              # ...and fail if any has since drifted
+check-figure-parity --prune      # drop manifest entries (and HTML) whose PNG was deleted
 check-figure-parity --figures    # which saved figures the document actually renders
 pytest tests -q
 ```
@@ -303,11 +360,12 @@ These are the ones worth knowing before you lose an afternoon.
 
 ## Architecture
 
-`src/doc_analysis/`, eleven modules:
+`src/doc_analysis/`, twelve modules:
 
 | Module | What it does |
 |---|---|
 | `env.py` | Reads a `.env` into the environment on import — `$DOC_ENV`, else the nearest above the cwd — without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
+| `layout.py` | Reads `layout.toml`, which in the nested layout puts the document repo at `<root>/<nested_dir>`, and — the other way up — the host document repo's, which makes the parent the document when it names this directory: `document_repo()`'s last two fallbacks. Stdlib `tomllib`. |
 | `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the installed checkout's `.env`, styles the backend, chdirs to the repo root. |
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
