@@ -170,6 +170,107 @@ def test_table_snippet_is_appended_once(tmp_path):
     assert (tmp_path / "tables.tex").read_text(encoding="utf-8").count("%<*fresh_tag>") == 1
 
 
+# --------------------------------------------------------------- \end{document}
+
+SUBFILE = ("\\documentclass[../../main.tex]{subfiles}\n"
+           "\\begin{document}\n"
+           "Last paragraph of the section.\n"
+           "\\end{document}\n")
+
+
+def _write_bytes(path, text):
+    """Write exactly these bytes: write_text would translate \n to CRLF on Windows."""
+    path.write_bytes(text.encode("utf-8"))
+    return path
+
+
+def test_subfile_block_goes_before_end_document(tmp_path):
+    """LaTeX ignores everything after \\end{document}: a block appended there would be
+    uncommented by the author and then silently never render (issue #4)."""
+    tex = _write_bytes(tmp_path / "section.tex", SUBFILE)
+    add_commented_figure_to_tex("brand_new.png", tmp_path, caption="New.")
+    text = tex.read_bytes().decode("utf-8")
+    assert text.index("brand_new.png") < text.index("\\end{document}")
+    assert text.rstrip("\n").splitlines()[-1] == "\\end{document}"
+    # One blank line above the block and one below it, before \end{document}.
+    assert "Last paragraph of the section.\n\n% \\begin{figure}[H]\n" in text
+    assert text.endswith("% \\end{figure}\n\n\\end{document}\n")
+
+
+def test_subfile_table_reference_goes_before_end_document(tmp_path):
+    """save_document_table shares the helper, so its \\ExecuteMetaData line had the same bug."""
+    tex = _write_bytes(tmp_path / "section.tex", SUBFILE)
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=tmp_path)
+    text = tex.read_bytes().decode("utf-8")
+    assert text.index("{fresh_tag}") < text.index("\\end{document}")
+    assert text.rstrip("\n").splitlines()[-1] == "\\end{document}"
+
+
+def test_successive_blocks_stay_before_end_document_in_order(tmp_path):
+    """The second block must not be placed after \\end{document} by the first one's
+    commented `% \\end{figure}` lines, nor ahead of the first block."""
+    tex = _write_bytes(tmp_path / "section.tex", SUBFILE)
+    add_commented_figure_to_tex("first.png", tmp_path)
+    add_commented_figure_to_tex("second.png", tmp_path)
+    text = tex.read_bytes().decode("utf-8")
+    assert text.index("first.png") < text.index("second.png") < text.index("\\end{document}")
+    assert "% \\end{figure}\n\n% \\begin{figure}[H]" in text
+    assert text.endswith("% \\end{figure}\n\n\\end{document}\n")
+
+
+def test_commented_end_document_is_not_an_insertion_point(tmp_path):
+    """A `% \\end{document}` ends nothing, so the block is appended as for a plain fragment."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\n% \\end{document}\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    text = tex.read_bytes().decode("utf-8")
+    assert text.startswith("Some prose.\n% \\end{document}\n\n% \\begin{figure}[H]")
+    assert text.endswith("% \\end{figure}\n")
+
+
+def test_last_live_end_document_wins(tmp_path):
+    """Only the last live \\end{document} is the end of what LaTeX reads."""
+    tex = _write_bytes(tmp_path / "section.tex",
+                       "\\begin{document}\nA\n\\end{document}\nB\n  \\end{document}\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    text = tex.read_bytes().decode("utf-8")
+    assert text.startswith("\\begin{document}\nA\n\\end{document}\nB\n\n% \\begin{figure}")
+    assert text.endswith("% \\end{figure}\n\n  \\end{document}\n")
+
+
+def test_fragment_without_end_document_is_appended_as_before(tmp_path):
+    """A plain \\input fragment keeps the old placement exactly."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path, caption="New.", label="new")
+    assert tex.read_bytes().decode("utf-8") == (
+        "Some prose.\n"
+        "\n"
+        "% \\begin{figure}[H]\n"
+        "%     \\centering\n"
+        "%     \\includegraphics[width=\\width]{brand_new.png}\n"
+        "%     \\caption{New.}\n"
+        "%     \\label{Fig: new}\n"
+        "% \\end{figure}\n")
+
+
+def test_text_after_end_document_is_preserved(tmp_path):
+    """Trailing blank lines (or anything else) after \\end{document} come back unchanged."""
+    tail = "\\end{document}\n\n\n% trailing note\n"
+    tex = _write_bytes(tmp_path / "section.tex", "Prose.\n" + tail)
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    assert tex.read_bytes().decode("utf-8").endswith("% \\end{figure}\n\n" + tail)
+
+
+def test_crlf_file_keeps_crlf_line_endings(tmp_path):
+    """The whole file is rewritten; a CRLF document must not come back half LF."""
+    tex = _write_bytes(tmp_path / "section.tex", SUBFILE.replace("\n", "\r\n"))
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    raw = tex.read_bytes().decode("utf-8")
+    assert "brand_new.png" in raw
+    assert "\n" not in raw.replace("\r\n", "")
+    assert raw.startswith(SUBFILE.replace("\n", "\r\n").split("\\end{document}")[0].rstrip())
+    assert raw.endswith("% \\end{figure}\r\n\r\n\\end{document}\r\n")
+
+
 # --------------------------------------------------------------- real repo
 
 @pytest.mark.skipif(not os.environ.get("DOC_REPO"),

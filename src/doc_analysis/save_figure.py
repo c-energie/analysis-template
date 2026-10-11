@@ -166,9 +166,13 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     Looks for .tex files directly inside section_dir, ignoring any whose name is in
     exclude (e.g. a generated table library file). tex_name picks the target file
     explicitly; otherwise a single candidate is used automatically and several raise,
-    because prompting would hang an unattended notebook run. The block is commented and
-    appended after a blank line. Returns the .tex Path written, or None when there is no
-    eligible .tex file.
+    because prompting would hang an unattended notebook run.
+
+    The block is commented and goes where uncommenting it renders it: when the file has a
+    live \\end{document} (a \\subfile section), immediately before the last one, with a
+    blank line on either side; otherwise it is appended after a blank line. Commented-out
+    \\end{document} lines are ignored. Returns the .tex Path written, or None when there is
+    no eligible .tex file.
     """
     section_dir = Path(section_dir)
     exclude = set(exclude)
@@ -197,13 +201,42 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     tex_path = section_dir / tex_name
     commented = _comment_block(block)
 
-    existing = tex_path.read_text(encoding="utf-8")
-    separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
-    with tex_path.open("a", encoding="utf-8") as tex_file:
-        tex_file.write(f"{separator}{commented}\n")
+    # Read without newline translation, so a rewrite below can leave every byte outside
+    # the inserted block exactly as it was.
+    existing = tex_path.read_bytes().decode("utf-8")
+    end = _end_document_offset(existing)
+    if end is None:
+        existing = tex_path.read_text(encoding="utf-8")
+        separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
+        with tex_path.open("a", encoding="utf-8") as tex_file:
+            tex_file.write(f"{separator}{commented}\n")
+    else:
+        # A subfile ends in \end{document}, and LaTeX ignores everything after it: a block
+        # appended there is uncommented by the author and then never renders, with no
+        # error (issue #4). Insert it before the line instead.
+        # The whole file is rewritten, so follow its line endings rather than the
+        # platform's: a CRLF document must not come back half LF, or wholly CRLF on Windows.
+        newline = "\r\n" if "\r\n" in existing else "\n"
+        body = existing[:end].rstrip("\r\n")
+        separator = newline * 2 if body else ""
+        commented = commented.replace("\n", newline)
+        tex_path.write_bytes(
+            f"{body}{separator}{commented}{newline * 2}{existing[end:]}".encode("utf-8"))
 
     print(f"Added commented reference to: {tex_path}")
     return tex_path
+
+
+# A live \end{document}: at the start of a line, after nothing but indentation. A line whose
+# first non-blank character is % -- including one inside an already-appended commented
+# block -- does not end the document, so it must not attract the insertion.
+_END_DOCUMENT_RE = re.compile(r"^[ \t]*\\end\{document\}", re.MULTILINE)
+
+
+def _end_document_offset(text):
+    """Offset of the line holding the last live \\end{document}, or None if there is none."""
+    matches = list(_END_DOCUMENT_RE.finditer(text))
+    return matches[-1].start() if matches else None
 
 
 def _build_figure_block(figure_name, caption, label):
