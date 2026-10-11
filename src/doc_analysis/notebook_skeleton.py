@@ -24,9 +24,17 @@ Jupyter-only: a copied-in notebook is a .ipynb, and marimo converts one itself.
 repository's notebooks/ only -- the original stays wherever it was copied from -- inserts
 the template's setup cell after the notebook's leading markdown, and lists the lines that
 still save, export or change directory the old way, for converting to save_fig/save_table.
+
+A notebook that already calls notebook_savers is not grafted, but its saver calls are
+checked against the current signature, and retrofit exits non-zero if any is out of date.
+An older fork's call -- `chapter=`, an unknown keyword, three names unpacked from two
+savers, a `save_value` nobody asked for, a free-text `label=` -- otherwise reads as
+"nothing to graft" and the notebook then fails at its setup cell, or worse, runs.
 """
 
 import argparse
+import ast
+import inspect
 import json
 import re
 import sys
@@ -53,6 +61,157 @@ LEGACY_PATTERNS = {
     "table export": re.compile(r"\.to_latex\(|\.style\.to_latex\("),
     "path hack": re.compile(r"os\.chdir\(|sys\.path\.(append|insert)\("),
 }
+
+# IPython syntax ast cannot parse. Blanked rather than dropped, so line numbers still match
+# what the author sees in the cell.
+MAGIC_LINE = re.compile(r"^\s*[%!]")
+SAVER_NAMES = re.compile(r"\b(notebook_savers|save_fig|save_table|save_value)\s*\(")
+SECTION_MEANING = ("check: in older forks `section=` meant the config table, which is now "
+                   "`config_section=`; make sure this names the document section")
+
+
+def _parse_cell(text):
+    """The cell's syntax tree, or None for a cell magic or code ast cannot read."""
+    if text.lstrip().startswith("%%"):
+        return None
+    try:
+        return ast.parse("\n".join("" if MAGIC_LINE.match(line) else line
+                                   for line in text.splitlines()))
+    except SyntaxError:
+        return None
+
+
+def _called_name(node):
+    """`f` for a call to f(...) or to module.f(...), else None."""
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
+
+
+def _constant(node):
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def savers_findings(cells):
+    """Every out-of-date saver call in *cells*, as (cell, line, kind, message, is_problem).
+
+    Parsed rather than pattern-matched: whether `save_value(...)` is wrong depends on
+    whether some other cell asked for values=True, and whether a label is free text depends
+    on the name passed beside it. The accepted keywords come from notebook_savers' own
+    signature, so this check moves with the function instead of being a second list of it.
+    """
+    from doc_analysis.savers import notebook_savers
+
+    params = inspect.signature(notebook_savers).parameters
+    positional = [name for name, p in params.items()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    findings = []
+    calls, unpacked, defined = [], {}, set()
+
+    for index, cell in enumerate(cells):
+        if cell.get("cell_type") != "code":
+            continue
+        text = "".join(cell.get("source", []))
+        tree = _parse_cell(text)
+        if tree is None:
+            # Unreadable is not the same as clean: report it, or a saver call hidden behind
+            # a magic would pass as "nothing to graft".
+            if SAVER_NAMES.search(text):
+                findings.append((index, 1, "unparsed", "cell is not plain Python; check its "
+                                 "saver calls by hand", True))
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                calls.append((index, node))
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                unpacked[id(node.value)] = node.targets[0]
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                defined.update(alias.asname or alias.name for alias in node.names)
+
+    def report(index, node, kind, message, is_problem=True):
+        findings.append((index, node.lineno, kind, message, is_problem))
+
+    values_enabled = False
+    for index, node in calls:
+        if _called_name(node) != "notebook_savers":
+            continue
+        keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+        for name in keywords:
+            if name not in params:
+                report(index, node, "unknown keyword",
+                       f"notebook_savers() does not accept {name}=; it takes "
+                       f"{', '.join(n + '=' for n in params)}")
+        if len(node.args) > len(positional):
+            report(index, node, "positional arguments",
+                   f"notebook_savers() takes at most {len(positional)} positional "
+                   f"arguments; pass them by keyword")
+        if "chapter" in keywords and "chapter" in params:
+            report(index, node, "deprecated keyword",
+                   "chapter= still works but warns; use section=")
+        section = keywords.get("section")
+        if section is None and node.args and positional[:1] == ["section"]:
+            section = node.args[0]
+        # The template's own setup cell passes section=SECTION, documented beside it as a
+        # path under Sections; warning on it would bury the calls that need a look.
+        templated = isinstance(section, ast.Name) and section.id == "SECTION"
+        if section is not None and not templated and "config_section" not in keywords:
+            report(index, node, "check", SECTION_MEANING, is_problem=False)
+
+        values = keywords.get("values") if "values" in params else None
+        # values=FLAG is taken as asking for it; only a literal falsy value is known not to.
+        wants_values = values is not None and (not isinstance(values, ast.Constant)
+                                               or bool(values.value))
+        values_enabled = values_enabled or wants_values
+        target = unpacked.get(id(node))
+        # A computed values= or a starred target could unpack anything: not counted.
+        if (isinstance(target, (ast.Tuple, ast.List))
+                and (values is None or isinstance(values, ast.Constant))
+                and not any(isinstance(t, ast.Starred) for t in target.elts)):
+            returned = 3 if wants_values else 2
+            if len(target.elts) != returned:
+                report(index, node, "unpacking",
+                       f"unpacks {len(target.elts)} names, but this call returns "
+                       f"{returned} savers" + ("" if wants_values or "values" not in params
+                                               else "; pass values=True for save_value"))
+
+    for index, node in calls:
+        called = _called_name(node)
+        if (called == "save_value" and isinstance(node.func, ast.Name)
+                and not values_enabled and "save_value" not in defined):
+            report(index, node, "save_value",
+                   "save_value is only returned by notebook_savers(..., values=True)")
+        if called in ("save_fig", "save_table") and isinstance(node.func, ast.Name):
+            keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+            name = node.args[1] if len(node.args) > 1 else keywords.get("name")
+            label = _constant(keywords.get("label"))
+            name = _constant(name)
+            # Only a label that provably differs from the stem: a variable may well hold it.
+            if isinstance(label, str) and isinstance(name, str) and label != Path(name).stem:
+                report(index, node, "free-text label",
+                       f"label={label!r} must mirror the file stem {Path(name).stem!r}; "
+                       f"drop it")
+    return sorted(findings, key=lambda f: f[:2])
+
+
+def report_savers(target, nb):
+    """`retrofit` on a notebook that already calls notebook_savers: check, never graft."""
+    findings = savers_findings(nb["cells"])
+    for index, lineno, kind, message, _ in findings:
+        lines = "".join(nb["cells"][index]["source"]).splitlines()
+        print(f"  cell {index} line {lineno}  [{kind}]  "
+              f"{lines[lineno - 1].strip() if lineno <= len(lines) else ''}")
+        print(f"      {message}")
+    problems = sum(1 for *_, is_problem in findings if is_problem)
+    if problems:
+        print(f"{target.name} already calls {SAVER_CALL[:-1]}, but {problems} problem(s) above "
+              f"do not fit its current signature; fix them by hand.")
+        return 1
+    print(f"{target.name} already calls {SAVER_CALL[:-1]}; nothing to graft.")
+    return 0
 
 
 def find_root(start=None):
@@ -191,7 +350,7 @@ def cmd_retrofit(args):
         sys.exit(f"{target} is not an existing .ipynb file.")
     nb = json.loads(target.read_text(encoding="utf-8"))
     if any(SAVER_CALL in "".join(cell.get("source", [])) for cell in nb["cells"]):
-        sys.exit(f"{target.name} already calls {SAVER_CALL[:-1]}; nothing to graft.")
+        return report_savers(target, nb)
 
     tex = resolve_tex(args.section, args.tex)
     # Only the setup cell is grafted, and it is the same for both backends.

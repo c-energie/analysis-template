@@ -285,7 +285,12 @@ the `marimo` extra is needed to `marimo edit` or `export` it).
 Bringing in a notebook from an existing project instead? Copy it under `notebooks/`, then
 `notebook-skeleton retrofit <notebook> --section <section>` grafts the same setup cell on
 and lists every line that still saves or exports the old way. It only edits notebooks
-inside this repo's `notebooks/`.
+inside this repo's `notebooks/`. A notebook that already calls `notebook_savers` is not
+grafted; its saver calls are checked against the current signature instead -- `chapter=`,
+unknown keywords, three names unpacked without `values=True`, `save_value` without it,
+and a `label=` that does not mirror the file stem each fail the run, while a `section=`
+without `config_section=` is flagged for a look, since older forks meant the config table
+by it.
 
 ## Running notebooks
 

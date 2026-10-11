@@ -92,8 +92,90 @@ def test_retrofit_grafts_setup_after_the_title_and_lists_legacy_lines(repo, caps
     out = capsys.readouterr().out
     assert "[path hack]" in out and "[figure save]" in out
     assert "sys.path.insert" not in out  # the grafted setup cell is not reported as legacy
-    with pytest.raises(SystemExit, match="already calls"):
-        main(["retrofit", str(target), "--section", "Results"])
+    assert main(["retrofit", str(target), "--section", "Results"]) == 0
+    assert "nothing to graft" in capsys.readouterr().out
+    assert len(json.loads(target.read_text(encoding="utf-8"))["cells"]) == len(cells)
+
+
+def savers_notebook(path, *sources):
+    """A copied-in notebook whose code cells already call notebook_savers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"cells": [
+        {"cell_type": "markdown", "metadata": {}, "source": ["# Old fits\n"]},
+        *({"cell_type": "code", "metadata": {}, "outputs": [], "execution_count": None,
+           "source": source.splitlines(keepends=True)} for source in sources),
+    ], "metadata": {}, "nbformat": 4, "nbformat_minor": 4}), encoding="utf-8")
+    return path
+
+
+def retrofit(repo, *sources):
+    target = savers_notebook(repo / "notebooks" / "Results" / "old_fits.ipynb", *sources)
+    before = target.read_bytes()
+    code = main(["retrofit", str(target), "--section", "Results"])
+    assert target.read_bytes() == before  # checked, never grafted or rewritten
+    return code
+
+
+def test_retrofit_reports_an_old_fork_savers_call_instead_of_nothing_to_graft(repo, capsys):
+    """An older fork's call read as "nothing to graft", then failed at its setup cell."""
+    code = retrofit(repo,
+                    '%matplotlib inline\n'
+                    'save_fig, save_table, save_value = notebook_savers(\n'
+                    '    chapter="X", notebook="n.ipynb", colour=True)\n',
+                    'save_value(0.42, "fit_r2")\n'
+                    'save_fig(fig, "fit.png", label="Fit of the PtG model")\n')
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "cell 1 line 2  [deprecated keyword]" in out and "use section=" in out
+    assert "[unknown keyword]" in out and "colour=" in out
+    assert "[unpacking]" in out and "pass values=True" in out
+    assert "cell 2 line 1  [save_value]" in out
+    assert "cell 2 line 2  [free-text label]" in out and "'fit'" in out
+    assert "nothing to graft" not in out
+
+
+def test_retrofit_accepts_the_values_saver_once_asked_for(repo, capsys):
+    """values=True with three names and a save_value call is the current signature (#9)."""
+    code = retrofit(repo,
+                    'save_fig, save_table, save_value = notebook_savers(\n'
+                    '    section=SECTION, notebook=NOTEBOOK, values=True)\n'
+                    'save_value(0.42, "fit_r2")\n'
+                    'save_fig(fig, "fit.png", label="fit")\n')
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "[" not in out and "nothing to graft" in out
+
+
+def test_retrofit_fails_the_issue_fixture_on_chapter_alone(repo, capsys):
+    """The old fork's call from #6: with save_value ported, chapter= is what is left."""
+    code = retrofit(repo, 'save_fig, save_table, save_value = notebook_savers(chapter="X", '
+                          'notebook="n.ipynb", values=True)\n'
+                          'save_value(0.42, "fit_r2")\n')
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "[deprecated keyword]" in out
+    assert "[unpacking]" not in out and "[save_value]" not in out
+
+
+def test_retrofit_reports_three_names_from_two_savers(repo, capsys):
+    """Unpacking three names without values=True fails with a ValueError when run."""
+    assert retrofit(repo, 'save_fig, save_table, save_value = notebook_savers(\n'
+                          '    section=SECTION, notebook=NOTEBOOK)\n') == 1
+    assert "[unpacking]" in capsys.readouterr().out
+
+
+def test_retrofit_warns_that_section_may_carry_its_old_meaning(repo, capsys):
+    """A bare section= may be an old fork's config table: flag it, but cannot fail on it."""
+    assert retrofit(repo, 'save_fig, save_table = notebook_savers(section="old_fits", '
+                          'notebook="old_fits.ipynb")\n') == 0
+    out = capsys.readouterr().out
+    assert "[check]" in out and "config_section=" in out and "nothing to graft" in out
+
+
+def test_retrofit_cannot_check_a_savers_call_it_cannot_parse(repo, capsys):
+    """A call in unparseable code must not pass as clean."""
+    assert retrofit(repo, 'save_fig, save_table = notebook_savers(section=SECTION,\n') == 1
+    assert "[unparsed]" in capsys.readouterr().out
 
 
 def test_retrofit_leaves_notebooks_outside_the_repo_alone(repo, tmp_path):
