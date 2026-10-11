@@ -4,6 +4,7 @@ Each test runs a copy of init.py in a throwaway copy of the files it rewrites, s
 real template is never touched and the script's self-deletion is harmless. A downstream
 repo has no init.py — it deleted itself — so there these tests have nothing to test.
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -230,3 +231,19 @@ def test_a_host_layout_naming_another_directory_is_not_this_repos_host(hosted_ch
     assert result.returncode == 0, result.stderr
     assert "from host layout.toml" not in result.stdout
     assert "copy .env.example to .env" in result.stdout
+
+
+def test_inside_a_host_document_a_person_at_a_terminal_is_not_asked_either(
+        hosted_checkout, monkeypatch):
+    """The subprocess runs above have no terminal, where nothing is ever asked; this is the
+    case the skip exists for. Asking a person here plants an absolute DOC_REPO in .env, or
+    offers to nest a second document inside a repo that is already nested in one."""
+    spec = importlib.util.spec_from_file_location("hosted_init", hosted_checkout / "init.py")
+    init = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(init)
+    asked = []
+    monkeypatch.setattr(init, "at_terminal", lambda: True)
+    monkeypatch.setattr(init, "ask", lambda prompt, **_: asked.append(prompt) or "")
+    init.main(["--distribution", "x-analysis", "--author", "A", "--backend", "plotly"])
+    assert asked == []
+    assert not (hosted_checkout / ".env").exists()
