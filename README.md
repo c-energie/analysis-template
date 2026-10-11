@@ -274,6 +274,7 @@ that is the whole point, that turning one artefact off never means editing a not
 ```bash
 check-figure-parity --snapshot   # record current figure dimensions as the baseline
 check-figure-parity              # ...and fail if any has since drifted
+check-figure-parity --prune      # drop manifest entries (and HTML) whose PNG was deleted
 check-figure-parity --figures    # which saved figures the document actually renders
 pytest tests -q
 ```
