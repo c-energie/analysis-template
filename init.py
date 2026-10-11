@@ -11,16 +11,25 @@ It asks for each answer in turn. To run it unattended, give them as flags instea
 (`python init.py --help`): a flag's value is used as-is, and with no terminal on stdin
 anything left out takes its default or, if it is required, stops the script.
 
+One question is whether to nest the document repo inside this one (`--nest`). Yes hands
+over to `setup_nested.py`, which creates it in a gitignored subdirectory and records it in
+`layout.toml`; no `DOC_REPO` path is asked for then.
+
 The **import package stays `doc_analysis`**, deliberately. Only the distribution name in
 `pyproject.toml` is yours to choose: renaming the package directory would rewrite every
 `import` in `src/`, `tests/` and your notebooks for no gain, and the two names are
 independent in Python anyway (`pillow` imports as `PIL`, `scikit-learn` as `sklearn`).
 
-Nothing outside this directory is touched, and the script refuses to run twice.
+Nothing outside this directory is touched, nor anything inside a nested repo — a
+subdirectory with its own `.git`, or the one `layout.toml` names — and the script refuses
+to run twice.
 """
 import argparse
+import os
 import re
+import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +38,9 @@ AUTHOR_TOKEN = "<<AUTHOR>>"
 # Tests only this script, and spells out the placeholder tokens: left behind, it would be
 # rewritten into nonsense and then skip forever.
 OWN_TEST = ROOT / "tests" / "test_init.py"
+# Stays after init.py is gone: a fresh clone of a nested layout runs it to restore.
+SETUP_NESTED = ROOT / "setup_nested.py"
+LAYOUT_FILE = ROOT / "layout.toml"
 
 SUFFIXES = {".py", ".toml", ".md", ".ipynb", ".cfg", ".txt"}
 SKIP_DIRS = {".git", ".github", ".venv", "build", "dist", "__pycache__"}
@@ -112,23 +124,58 @@ def parse_args(argv=None):
     parser.add_argument("--doc-repo", type=str.strip,
                         help="path to your document repo, written to .env as DOC_REPO "
                              "(left out: .env is not written)")
+    parser.add_argument("--nest", action="store_true",
+                        help="nest the document repo inside this one: runs setup_nested.py "
+                             "(which needs gh) instead of asking for a DOC_REPO path")
     parser.add_argument("--backend",
                         type=checked(lambda answer: answer in BACKENDS, BACKEND_HINT,
                                      lambda value: value.strip().lower()),
                         help=f"plotting backend, one of {', '.join(BACKENDS)} "
                              f"(default: {BACKENDS[0]})")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.nest and args.doc_repo is not None:
+        parser.error("--nest and --doc-repo are alternatives: a nested document repo is "
+                     "found from layout.toml, not from DOC_REPO")
+    return args
+
+
+def nested_dir():
+    """The nested repo layout.toml names, or None. Read, not trusted: a malformed file
+    only means there is no name to skip, and the `.git` check still catches the repo."""
+    try:
+        name = tomllib.loads(LAYOUT_FILE.read_text(encoding="utf-8")).get("nested_dir")
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return (ROOT / name).resolve() if isinstance(name, str) and name.strip() else None
 
 
 def files():
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix not in SUFFIXES:
-            continue
-        if any(part in SKIP_DIRS for part in path.relative_to(ROOT).parts):
-            continue
-        if path == Path(__file__).resolve() or path == OWN_TEST:
-            continue
-        yield path
+    # Pruned while walking, not filtered after: a nested repo is somebody else's history,
+    # and a <<…>> token in its files — a writing-template placeholder, say — is not ours
+    # to fill. Any subdirectory with its own .git counts, layout.toml or not.
+    nested = nested_dir()
+    for directory, subdirs, names in os.walk(ROOT):
+        here = Path(directory)
+        subdirs[:] = [name for name in subdirs
+                      if name not in SKIP_DIRS and not (here / name / ".git").exists()
+                      and (here / name).resolve() != nested]
+        for name in names:
+            path = here / name
+            if path.suffix not in SUFFIXES:
+                continue
+            if path == Path(__file__).resolve() or path == OWN_TEST:
+                continue
+            yield path
+
+
+def nest():
+    """Run setup_nested.py with its defaults; stop here if it did not succeed."""
+    result = subprocess.run([sys.executable, str(SETUP_NESTED)], cwd=ROOT,
+                            stdin=subprocess.DEVNULL)
+    if result.returncode != 0:
+        sys.exit("init.py: nesting the document repo did not succeed (see above); nothing "
+                 "else was changed. Fix that and run init.py again, or run it without "
+                 "--nest and set DOC_REPO.")
 
 
 def write_env(doc_repo):
@@ -167,8 +214,13 @@ def main(argv=None):
         "Project name (distribution, e.g. gridflex-analysis)",
         validator=VALID_DISTRIBUTION.match, hint=DISTRIBUTION_HINT)
     author = args.author or ask("Author")
+    nested = args.nest
+    if not nested and args.doc_repo is None and interactive:
+        nested = ask("Nest the document inside this repo? [y/N]", required=False,
+                     validator=lambda answer: answer.lower() in ("y", "yes", "n", "no"),
+                     hint="y or n.").lower() in ("y", "yes")
     doc_repo = args.doc_repo
-    if doc_repo is None:
+    if doc_repo is None and not nested:
         doc_repo = ask("Path to your document repo (blank to set DOC_REPO later)",
                        required=False) if interactive else ""
 
@@ -183,6 +235,11 @@ def main(argv=None):
                       hint=BACKEND_HINT).lower()
     backend = backend or BACKENDS[0]
 
+    # Before the placeholder pass, so a refused gh leaves the template exactly as it was
+    # and init.py can simply be run again.
+    if nested:
+        nest()
+
     changed = 0
     for path in files():
         text = original = path.read_text(encoding="utf-8")
@@ -194,7 +251,9 @@ def main(argv=None):
 
     print(f"\nRewrote {changed} file(s). The package stays importable as `doc_analysis`.")
 
-    if doc_repo:
+    if nested:
+        print("\nDOC_REPO needs no .env: doc_analysis reads it from layout.toml.")
+    elif doc_repo:
         write_env(doc_repo)
     else:
         print("\nNext, copy .env.example to .env and point DOC_REPO at your document repo.")

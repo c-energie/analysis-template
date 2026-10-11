@@ -13,6 +13,7 @@ import pytest
 
 TEMPLATE = Path(__file__).resolve().parents[1]
 INIT = TEMPLATE / "init.py"
+SETUP_NESTED = TEMPLATE / "setup_nested.py"
 
 pytestmark = pytest.mark.skipif(not INIT.exists(), reason="init.py has already run")
 
@@ -22,18 +23,37 @@ PYPROJECT = '[project]\nname = "PACKAGE-NAME"\nauthors = [{ name = "<<AUTHOR>>" 
 @pytest.fixture
 def checkout(tmp_path):
     (tmp_path / "init.py").write_text(INIT.read_text(encoding="utf-8"), encoding="utf-8")
+    # --nest runs it; it stays behind when init.py deletes itself.
+    (tmp_path / "setup_nested.py").write_text(SETUP_NESTED.read_text(encoding="utf-8"),
+                                              encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_init.py").write_text(PYPROJECT, encoding="utf-8")
     return tmp_path
 
 
-def run_init(checkout, *flags):
+def run_init(checkout, *flags, env=None):
     # stdin=DEVNULL: not a TTY, so nothing may be prompted for. PYTHONIOENCODING, as
     # setup sets it: init.py prints em dashes, which the Windows code page cannot encode.
     return subprocess.run([sys.executable, "init.py", *flags], cwd=checkout,
                           stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
-                          env=os.environ | {"PYTHONIOENCODING": "utf-8"})
+                          env=(env or os.environ) | {"PYTHONIOENCODING": "utf-8"})
+
+
+def nested_repo(directory):
+    """A stand-in nested document repo: its own .git, and files full of tokens that are
+    writing-template's or its author's, not ours to fill."""
+    (directory / ".git").mkdir(parents=True)
+    (directory / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (directory / "README.md").write_text("# PACKAGE-NAME by <<AUTHOR>>\n", encoding="utf-8")
+    (directory / "notes").mkdir()
+    (directory / "notes" / "setup.py").write_text("NAME = 'PACKAGE-NAME'\n", encoding="utf-8")
+    return directory
+
+
+def snapshot(directory):
+    return {path.relative_to(directory).as_posix(): path.read_bytes()
+            for path in sorted(directory.rglob("*")) if path.is_file()}
 
 
 def unchanged(checkout):
@@ -113,3 +133,51 @@ def test_already_initialised_wins_over_missing_flags(checkout):
     assert result.returncode == 1
     assert "already been initialised" in result.stdout
     assert "--author" not in result.stderr
+
+
+def test_nest_leaves_a_nested_repo_byte_for_byte_unchanged(checkout):
+    """The placeholder pass used to walk everything under the root — a nested document
+    repo included — and would have rewritten its <<…>> tokens as if they were ours."""
+    nested = nested_repo(checkout / "doc-writing")
+    (checkout / "layout.toml").write_text(
+        'layout = "analysis-hosts-writing"\nnested_dir = "doc-writing"\n'
+        'nested_remote = "https://example.invalid/doc-writing.git"\n', encoding="utf-8")
+    before = snapshot(nested)
+
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest")
+    assert result.returncode == 0, result.stderr
+    assert snapshot(nested) == before
+    assert 'name = "x-analysis"' in (checkout / "pyproject.toml").read_text(encoding="utf-8")
+    # Nested: DOC_REPO comes from layout.toml, so there is no path to ask for or write.
+    assert not (checkout / ".env").exists()
+    assert "Path to your document repo" not in result.stdout
+    assert (checkout / "setup_nested.py").exists()
+
+
+def test_any_subdirectory_with_its_own_git_is_skipped_without_a_layout(checkout):
+    """A repo cloned in by hand, before or without setup_nested.py, is just as foreign."""
+    nested = nested_repo(checkout / "cloned-by-hand")
+    before = snapshot(nested)
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A")
+    assert result.returncode == 0, result.stderr
+    assert snapshot(nested) == before
+
+
+def test_nest_without_gh_stops_before_anything_is_rewritten(checkout, tmp_path):
+    """Nesting runs first, so a refusal leaves the template whole and init.py re-runnable."""
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest",
+                      env=os.environ | {"PATH": str(empty)})
+    assert result.returncode != 0
+    assert "gh auth login" in result.stderr
+    assert unchanged(checkout)
+    assert not (checkout / "layout.toml").exists()
+
+
+def test_nest_and_doc_repo_are_alternatives(checkout):
+    result = run_init(checkout, "--distribution", "x-analysis", "--author", "A", "--nest",
+                      "--doc-repo", "/p")
+    assert result.returncode != 0
+    assert "--nest" in result.stderr and "--doc-repo" in result.stderr
+    assert unchanged(checkout)
