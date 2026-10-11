@@ -183,3 +183,20 @@ def test_prune_runs_without_doc_repo(layout, monkeypatch):
         main(["--prune", "--html-dir", str(html_dir)])
     assert exc.value.code == 0
     assert set(read_manifest(html_dir)) == {"Fig: bar"}
+
+
+def test_prune_keeps_html_still_named_by_a_live_entry(layout):
+    """The HTML is named by stem alone, so a stem re-saved in another section under a new
+    label shares it with the retired entry; deleting it would break the live figure."""
+    doc, figures, html_dir = layout
+    moved = doc / "Sections" / "Discussion" / "Figures"
+    moved.mkdir(parents=True)
+    (moved / "foo.png").write_bytes(png_bytes())
+    manifest = read_manifest(html_dir)
+    manifest["Fig: foo-moved"] = dict(manifest["Fig: foo"], static=str(moved / "foo.png"))
+    write_manifest(html_dir, manifest)
+    (figures / "foo.png").unlink()
+
+    assert prune(html_dir) == 0
+    assert set(read_manifest(html_dir)) == {"Fig: bar", "Fig: foo-moved"}
+    assert (html_dir / "foo.html").exists()

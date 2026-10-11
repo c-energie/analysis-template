@@ -133,12 +133,16 @@ def prune(html_dir=None, dry_run=False):
         return 0
 
     verb = "would prune" if dry_run else "pruned"
-    for key in stale:
-        entry = manifest.pop(key)
+    pruned = {key: manifest.pop(key) for key in stale}
+    # The HTML is named by stem alone, so a stem re-saved elsewhere under another label
+    # shares it with the retired entry; deleting it then would break the live figure.
+    live_html = {entry.get("interactive") for entry in manifest.values()}
+    for key, entry in pruned.items():
         # `interactive` is relative to the manifest file (the publishing engine resolves
         # it the same way), and null for a matplotlib figure, which has no HTML.
         interactive = entry.get("interactive")
-        html = manifest_path.parent / interactive if interactive else None
+        html = (manifest_path.parent / interactive
+                if interactive and interactive not in live_html else None)
         if html is not None and html.is_file():
             if not dry_run:
                 html.unlink()
