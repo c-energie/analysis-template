@@ -84,8 +84,8 @@ uv run python -m pytest tests -q     # not `uv run pytest` — the trampoline ca
 
 This is then the unfilled template: the distribution name and author in `pyproject.toml`
 are still placeholder tokens. **Do not run `init.py`** — it belongs to a repo created from
-this one via GitHub's "Use this template", it prompts for answers, and it deletes itself
-when done. In a downstream repo it has already run and this section no longer applies.
+this one via GitHub's "Use this template", it prompts for answers (or takes them as
+flags), and it deletes itself when done. In a downstream repo it has already run and this section no longer applies.
 
 ## Agent skills
 
