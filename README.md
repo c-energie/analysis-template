@@ -46,6 +46,11 @@ which plotting backend you want — then writes your `.env` and deletes itself. 
 in **your** repository; it edits in place and then removes itself, so it is not something
 to run in a checkout of the template. The path can be left blank and set later in `.env`.
 
+To run it unattended, pass the answers as flags instead — `--distribution`, `--author`,
+`--doc-repo` (optional) and `--backend` (default `plotly`); `python init.py --help` lists
+them. A flag skips its question, and a bad value stops the script with the reason. With no
+terminal to ask on, a left-out `--distribution` or `--author` stops it too.
+
 **3. Install, with the backend you chose** (Python 3.11.4+):
 
 ```bash
