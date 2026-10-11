@@ -1,4 +1,4 @@
-"""One save_fig / save_table pair, shared by every notebook.
+"""One save_fig / save_table pair (and optionally save_value), shared by every notebook.
 
 Each notebook used to carry its own copy of these closures plus a SAVE_FIGURES constant.
 That put the same eight lines in eight places and made the on/off decision a source edit.
@@ -19,14 +19,18 @@ the division of the document (a directory under $DOC_REPO/Sections), while
 
 import warnings
 
-from doc_analysis.figure_config import FIGURES, TABLES, entry_name, is_enabled
+from doc_analysis.figure_config import FIGURES, TABLES, VALUES, entry_name, is_enabled
 from doc_analysis.save_figure import save_document_figure
 from doc_analysis.save_table import save_document_table
+from doc_analysis.save_value import check_value_name, save_document_value
 
 
 def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
-                    config_path=None, chapter=None):
+                    config_path=None, chapter=None, values=False):
     """Return (save_fig, save_table) bound to one notebook's section.
+
+    values=True returns (save_fig, save_table, save_value) instead. It is opt-in so that
+    every notebook already unpacking two savers keeps working unchanged.
 
     section is the path under $DOC_REPO/Sections, notebook the .ipynb filename (it is
     recorded in the figure manifest), and tex names the section .tex file that should
@@ -76,6 +80,19 @@ def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
         kwargs.setdefault("tex", tex)
         return save_document_table(df, name, caption=caption, section=section, **kwargs)
 
+    def save_value(value, name, **kwargs):
+        """Write a scalar into the section's values.tex as a macro, if the config allows it."""
+        _refuse_placeholder("value name", name)
+        # Before the config, which would otherwise record a swapped-in number as a key.
+        check_value_name(name)
+        if not is_enabled(config_section, name, VALUES, path=config_path):
+            return None
+        kwargs.setdefault("tex", tex)
+        return save_document_value(name, value, section=section, notebook=notebook,
+                                   **kwargs)
+
+    if values:
+        return save_fig, save_table, save_value
     return save_fig, save_table
 
 

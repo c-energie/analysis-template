@@ -59,6 +59,12 @@ DEFAULT_HTML_DIR = Path(__file__).resolve().parents[2] / "figures_html"
 # Artifact sub-directories (figures/tables) are save targets, not sections to descend into.
 ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
 
+# The .tex libraries save_table and save_value write into a section. Generated, so never a
+# target for a commented reference: counting them as candidates would make a one-file
+# section look ambiguous as soon as its first table or value was saved, and every later
+# save with tex=None would raise.
+GENERATED_TEX_NAMES = ("tables.tex", "values.tex")
+
 
 def document_repo():
     """Root of the LaTeX document repo, from $DOC_REPO, else from a `layout.toml`.
@@ -209,8 +215,8 @@ def _comment_block(block):
 def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     """Append a commented-out LaTeX block to a .tex file in section_dir.
 
-    Looks for .tex files directly inside section_dir, ignoring any whose name is in
-    exclude (e.g. a generated table library file). tex_name picks the target file
+    Looks for .tex files directly inside section_dir, ignoring the generated libraries
+    (GENERATED_TEX_NAMES) and any whose name is in exclude. tex_name picks the target file
     explicitly; otherwise a single candidate is used automatically and several raise,
     because prompting would hang an unattended notebook run.
 
@@ -221,7 +227,7 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     no eligible .tex file.
     """
     section_dir = Path(section_dir)
-    exclude = set(exclude)
+    exclude = set(exclude) | set(GENERATED_TEX_NAMES)
     tex_names = sorted(p.name for p in section_dir.glob("*.tex") if p.name not in exclude)
     if not tex_names:
         print(f"No .tex file found in {section_dir}; skipping reference.")

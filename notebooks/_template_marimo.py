@@ -41,6 +41,9 @@ def _():
     NOTEBOOK = "<<NOTEBOOK>>"
     TEX = "<<TEX>>"
 
+    # Add values=True for a third saver, save_value(value, name), which writes a number quoted
+    # in the prose into the section's values.tex as a LaTeX macro (return it from the cell too):
+    #     save_fig, save_table, save_value = notebook_savers(..., values=True)
     save_fig, save_table = notebook_savers(section=SECTION, notebook=NOTEBOOK, tex=TEX)
     return ROOT, save_fig, save_table
 

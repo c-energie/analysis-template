@@ -231,6 +231,39 @@ integer. A figure can change backend without the document reflowing, and one
 `notebook_savers` binds the routing once so individual calls stay about the figure.
 Whether a call writes anything is decided by `figures_config.toml`, not by the source.
 
+### Numbers in the prose
+
+A number quoted in the text is a result too, and one typed in by hand drifts the first time
+the notebook re-runs on new data. `values=True` adds a third saver, which writes it into
+the section's `values.tex` as a LaTeX macro:
+
+```python
+save_fig, save_table, save_value = notebook_savers(section=SECTION, notebook=NOTEBOOK,
+                                                   tex=TEX, values=True)
+
+save_value(0.873, "ptg_mlr_agreement")                      # \ptgMlrAgreement -> 0.87
+save_value(0.412, "heat_pump_share", fmt="percent", decimals=1)    # 41.2\%
+save_value(-12.4, "cv_rmse_20", unit="K", signed=True)      # \cvRmseTwoZero -> $-12.40$\,K
+```
+
+The macro is the snake_case name in lower camel case, digits spelled out (TeX macro names
+are letters only); `macro=` overrides it. `decimals`, `fmt="percent"` (×100 and `\%`),
+`scale`, `signed` and `unit` shape the number; a string passes through unchanged. Without
+`values=True` the call still returns two savers, so existing notebooks are untouched.
+
+Each value is a tagged block — a `\providecommand` then a `\renewcommand`, so the file
+survives being input twice — and re-saving a name replaces its block. The first save
+appends a commented `\ptgMlrAgreement` to the section's `.tex` (same `tex=` rules as a
+figure) for you to place in a sentence. The document loads the file once, from its root
+settings file, with one line per section next to `\graphicspath`:
+
+```latex
+\InputIfFileExists{Sections/Results/ptg_application/values.tex}{}{}
+```
+
+`save_value` never edits the preamble: when that line is missing it warns, giving the exact
+line to add. Never edit a `values.tex` by hand — the next save rewrites it.
+
 ### Starting a notebook
 
 ```bash
@@ -252,7 +285,12 @@ the `marimo` extra is needed to `marimo edit` or `export` it).
 Bringing in a notebook from an existing project instead? Copy it under `notebooks/`, then
 `notebook-skeleton retrofit <notebook> --section <section>` grafts the same setup cell on
 and lists every line that still saves or exports the old way. It only edits notebooks
-inside this repo's `notebooks/`.
+inside this repo's `notebooks/`. A notebook that already calls `notebook_savers` is not
+grafted; its saver calls are checked against the current signature instead -- `chapter=`,
+unknown keywords, three names unpacked without `values=True`, `save_value` without it,
+and a `label=` that does not mirror the file stem each fail the run, while a `section=`
+without `config_section=` is flagged for a look, since older forks meant the config table
+by it.
 
 ## Running notebooks
 
@@ -312,9 +350,13 @@ Notebooks written against the old `from setup_notebook import ROOT` keep working
 default = true          # what an unlisted name does, and is recorded as
 save_figures = true     # master switch; can veto, never turns an entry on
 save_tables = true
+save_values = true      # optional; true when absent
 
 [example_figure.figures]
 example_scatter = true
+
+[example_figure.values]     # save_value's names, gated the same way
+ptg_mlr_agreement = true
 ```
 
 The tables are keyed by **notebook stem** — not by document section — and fill themselves
@@ -360,7 +402,7 @@ These are the ones worth knowing before you lose an afternoon.
 
 ## Architecture
 
-`src/doc_analysis/`, twelve modules:
+`src/doc_analysis/`, thirteen modules:
 
 | Module | What it does |
 |---|---|
@@ -372,8 +414,9 @@ These are the ones worth knowing before you lose an afternoon.
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |
 | `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Sections/<section>/Figures/`, a manifest entry, and — for a plotly figure — the interactive HTML. |
 | `save_table.py` | `save_document_table()`: booktabs LaTeX into a per-section `tables.tex`, tagged so re-saving replaces in place. |
+| `save_value.py` | `save_document_value()`: a scalar as a LaTeX macro in a per-section `values.tex`, tagged like `tables.tex`; warns when the document does not load the file. |
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |
-| `savers.py` | `notebook_savers()` — the pair every notebook uses. |
+| `savers.py` | `notebook_savers()` — the pair every notebook uses, plus `save_value` with `values=True`. |
 | `parity.py` | The `check-figure-parity` console script. |
 | `notebook_skeleton.py` | The `notebook-skeleton` console script: a new notebook from `notebooks/_template.ipynb` (or, with `--marimo`, a marimo app from `notebooks/_template_marimo.py`), or the Jupyter template's setup cell grafted onto a copied-in one. |
 

@@ -12,7 +12,8 @@ which is what an agent needs before it runs anything.
 `doc_analysis` exists to write into the LaTeX document repo, located by `DOC_REPO`.
 `save_document_figure()` creates `$DOC_REPO/Sections/<section>/Figures/<name>.png` and
 appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
-`tables.tex`. Nothing it writes shows up in this repo's `git status`.
+`tables.tex`, and `save_document_value()` (`save_value`) its `values.tex`. Nothing it
+writes shows up in this repo's `git status`.
 
 - **Confirm `DOC_REPO` points at the document you think it does before running anything
   that saves.** Resolution (`src/doc_analysis/env.py`): a real environment variable wins,
@@ -69,6 +70,14 @@ not prompt.
   `notebook_setup()` is the single source of the setup: the templates' setup cell only
   calls it. Change behaviour there, never by adding path logic to a cell — a cell that
   walks the filesystem breaks when a kernel starts outside the repo.
+- **`save_value` writes numbers, not figures, by the same rules.** `notebook_savers(...,
+  values=True)` returns `(save_fig, save_table, save_value)`; without it, still two — every
+  existing notebook unpacks two, so do not make it the default. `save_value(value, name)`
+  puts value first, the worker `save_document_value(name, value)` name first; a non-string
+  name raises `TypeError` for that reason. Values are gated by the `values` table in
+  `figures_config.toml`. Never edit `values.tex` by hand, and never add the
+  `\InputIfFileExists{Sections/<section>/values.tex}{}{}` line to the document's preamble
+  yourself unless asked: the save warns with the line, and the preamble is the author's.
 - **Pin `width`/`height` on any figure already committed.** The default size is smaller
   than most, so regenerating without pinning reflows the document silently.
 

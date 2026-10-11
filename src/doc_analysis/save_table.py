@@ -81,7 +81,15 @@ def _build_table_block(tabular_latex, caption, label):
 
 
 def _write_table_to_library(library_path, tag, block):
-    """Insert (or replace) a tagged table block in the shared library .tex file.
+    """Insert (or replace) a tagged table block in the shared library .tex file."""
+    return _write_tagged_block(library_path, tag, block, kind="table")
+
+
+def _write_tagged_block(library_path, tag, block, kind):
+    """Insert (or replace) a tagged block in a shared library .tex file.
+
+    Shared by tables.tex and save_value's values.tex; kind only names the block in the
+    message.
 
     The block is bracketed by catchfilebetweentags markers (%<*tag> ... %</tag>) so a
     single table can later be pulled out with \\ExecuteMetaData[<library>]{tag}. If the tag
@@ -104,7 +112,7 @@ def _write_table_to_library(library_path, tag, block):
         action = "Appended"
 
     library_path.write_text(content, encoding="utf-8")
-    print(f"{action} table '{tag}' in: {library_path}")
+    print(f"{action} {kind} '{tag}' in: {library_path}")
     return library_path
 
 
