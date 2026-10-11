@@ -1,0 +1,9 @@
+{
+  "extraKnownMarketplaces": {
+    "c-energie": {
+      "source": { "source": "github", "repo": "c-energie/claude-tools" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": { "project-workspace@c-energie": true }
+}

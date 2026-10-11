@@ -114,6 +114,13 @@ flags), and it deletes itself when done. In a downstream repo it has already run
 
 ## Agent skills
 
+### Workspace skills (Claude Code)
+
+`.claude/settings.json` enables the `project-workspace@c-energie` plugin, auto-updating: the
+document-workspace setup and adapt skills, e.g. `/project-workspace:adapt-existing-analysis`.
+They expect to run from the workspace root (the directory holding `workspace.toml`), not from
+inside this repo.
+
 ### Issue tracker
 
 GitHub Issues on this repo, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
