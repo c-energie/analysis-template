@@ -23,6 +23,8 @@ PYPROJECT = '[project]\nname = "PACKAGE-NAME"\nauthors = [{ name = "<<AUTHOR>>" 
 def checkout(tmp_path):
     (tmp_path / "init.py").write_text(INIT.read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_init.py").write_text(PYPROJECT, encoding="utf-8")
     return tmp_path
 
 
@@ -47,6 +49,8 @@ def test_every_flag_given_runs_unattended(checkout):
     assert 'name = "x-analysis"' in pyproject and 'name = "A"' in pyproject
     assert "DOC_REPO=/p\n" in (checkout / ".env").read_text(encoding="utf-8")
     assert not (checkout / "init.py").exists()
+    # It holds the placeholder tokens and only tests init.py, so it goes with it.
+    assert not (checkout / "tests" / "test_init.py").exists()
     for prompt in ("Project name", "Author", "Path to your document repo", "Backend",
                    "Plotting backend"):
         assert prompt not in result.stdout

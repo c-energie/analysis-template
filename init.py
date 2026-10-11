@@ -26,6 +26,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DIST_TOKEN = "PACKAGE-NAME"
 AUTHOR_TOKEN = "<<AUTHOR>>"
+# Tests only this script, and spells out the placeholder tokens: left behind, it would be
+# rewritten into nonsense and then skip forever.
+OWN_TEST = ROOT / "tests" / "test_init.py"
 
 SUFFIXES = {".py", ".toml", ".md", ".ipynb", ".cfg", ".txt"}
 SKIP_DIRS = {".git", ".github", ".venv", "build", "dist", "__pycache__"}
@@ -123,7 +126,7 @@ def files():
             continue
         if any(part in SKIP_DIRS for part in path.relative_to(ROOT).parts):
             continue
-        if path.name == Path(__file__).name:
+        if path == Path(__file__).resolve() or path == OWN_TEST:
             continue
         yield path
 
@@ -213,7 +216,8 @@ def main(argv=None):
     print("    package itself, so the tooling stays installable on its own.")
 
     Path(__file__).unlink()
-    print("\nDeleted init.py.")
+    OWN_TEST.unlink(missing_ok=True)
+    print("\nDeleted init.py and its test.")
     return 0
 
 
