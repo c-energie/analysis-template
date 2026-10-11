@@ -76,7 +76,7 @@ def pick_backend(requested):
 
 def resolve_tex(section, tex):
     """TEX for the setup cell, checked against the document when $DOC_REPO is set."""
-    from doc_analysis.save_figure import document_repo, sections_dir
+    from doc_analysis.save_figure import GENERATED_TEX_NAMES, document_repo, sections_dir
 
     try:
         document_repo()
@@ -87,7 +87,8 @@ def resolve_tex(section, tex):
     if not section_dir.is_dir():
         sys.exit(f"Section {section!r} not found: {section_dir} does not exist. Create the "
                  f"section in the document first, or check the spelling.")
-    candidates = sorted(p.name for p in section_dir.glob("*.tex") if p.name != "tables.tex")
+    candidates = sorted(p.name for p in section_dir.glob("*.tex")
+                        if p.name not in GENERATED_TEX_NAMES)
     if tex:
         if tex not in candidates:
             sys.exit(f"--tex {tex!r} is not in {section_dir}; it holds: {', '.join(candidates) or 'no .tex files'}.")

@@ -1,6 +1,7 @@
 """Figure and table tooling for the document.
 
     from doc_analysis import save_document_figure, save_document_table, figure_size
+    from doc_analysis import save_document_value
 
 The LaTeX document repo is located via `DOC_REPO`, read from the checkout's own `.env`;
 nothing here hardcodes a path, and nothing here depends on a private package.
@@ -42,6 +43,11 @@ from doc_analysis.save_table import (
     find_table_reference,
     save_document_table,
 )
+from doc_analysis.save_value import (
+    format_value,
+    macro_name,
+    save_document_value,
+)
 from doc_analysis.figure_config import (
     config_path,
     is_enabled,
@@ -64,6 +70,9 @@ __all__ = [
     "dataframe_to_latex",
     "find_table_reference",
     "save_document_table",
+    "format_value",
+    "macro_name",
+    "save_document_value",
     "config_path",
     "is_enabled",
     "load_config",

@@ -24,6 +24,7 @@ def repo(tmp_path, monkeypatch):
     (document / "Sections" / "Results").mkdir(parents=True)
     (document / "Sections" / "Results" / "results.tex").write_text("", encoding="utf-8")
     (document / "Sections" / "Results" / "tables.tex").write_text("", encoding="utf-8")
+    (document / "Sections" / "Results" / "values.tex").write_text("", encoding="utf-8")
     monkeypatch.setenv("DOC_REPO", str(document))
     monkeypatch.chdir(analysis)
     return analysis
@@ -38,7 +39,7 @@ def test_new_fills_routing_and_mirrors_the_section(repo):
     text = source(repo / "notebooks" / "Results" / "fits.ipynb")
     assert 'SECTION = "Results"' in text
     assert 'NOTEBOOK = "fits.ipynb"' in text
-    assert "TEX = None" in text  # one candidate besides tables.tex: the saver finds it
+    assert "TEX = None" in text  # one candidate besides the generated libraries
     assert "figure_size_in" in text and "plotly" not in text
     assert "<<FIGURE>>" in text  # left for the author to name
 

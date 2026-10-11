@@ -1,4 +1,4 @@
-"""Which figures and tables a notebook run is allowed to write.
+"""Which figures, tables and values a notebook run is allowed to write.
 
 A notebook re-run regenerates every artefact it can, which is rarely what you want: most
 runs are exploratory, and writing into `$DOC_REPO` on each one churns committed PNGs
@@ -17,6 +17,13 @@ This module replaces that with one file, `figures_config.toml` at the repo root:
 
     [dataset_assessment.tables]
     cohort_summary = true
+
+    [dataset_assessment.values]
+    cohort_size = true
+
+`values` are save_value's scalars, gated exactly like the other two; their master switch,
+`save_values`, is honoured when present and true when absent, so a config written before
+values existed needs no edit.
 
 A name that is not listed yet is **recorded with the `default` value and that value is
 honoured on the spot** — there is no special case for the first run. The shipped
@@ -44,7 +51,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / CONFIG_NAME
 
 FIGURES = "figures"
 TABLES = "tables"
-MASTER_KEY = {FIGURES: "save_figures", TABLES: "save_tables"}
+VALUES = "values"
+MASTER_KEY = {FIGURES: "save_figures", TABLES: "save_tables", VALUES: "save_values"}
 
 DEFAULT_KEY = "default"
 
@@ -144,7 +152,7 @@ def is_enabled(section, name, kind=FIGURES, path=None, record=True):
     """Whether this artefact may be written, recording it when it is not yet listed.
 
     section is the notebook (its stem by convention), name the figure/table name with or
-    without an extension, kind "figures" or "tables". An unlisted name is appended with
+    without an extension, kind "figures", "tables" or "values". An unlisted name is appended with
     the config's `default` (true unless set otherwise) and that value is returned, so the
     config self-populates and a newly named artefact is saved rather than silently missed.
     """
