@@ -24,6 +24,7 @@ convention. That file is hand-edited and never touched here: a save only warns, 
 exact line to add, when the line is missing.
 """
 
+import math
 import re
 import warnings
 from pathlib import Path
@@ -105,6 +106,10 @@ def format_value(value, fmt=None, decimals=2, unit=None, scale=None, signed=Fals
         number = float(value)
     except (TypeError, ValueError) as exc:
         raise TypeError(f"value {value!r} is neither a number nor a string.") from exc
+    # A failed computation is NaN, not an exception; written through, the prose would read
+    # "nan" in the compiled document with nothing having complained.
+    if not math.isfinite(number):
+        raise ValueError(f"value {value!r} is not finite; pass a string to write it as text.")
 
     if scale is None and fmt == PERCENT:
         scale = 100
@@ -191,8 +196,10 @@ def check_values_loaded(section_dir, library_name=LIBRARY_NAME):
 
     # Accept the line in any root-level file, so a document that loads it from main.tex
     # rather than the settings file is not nagged; only a live line counts.
+    # \input{.../values} without the extension is how LaTeX is usually written, and loads
+    # the same file; not accepting it would warn about a document that is fine.
     loads = re.compile(r"\\(?:InputIfFileExists|input)\s*\{\s*(?:\./)?"
-                       + re.escape(relative) + r"\s*\}")
+                       + re.escape(relative.removesuffix(".tex")) + r"(?:\.tex)?\s*\}")
     candidates = sorted([*doc_root.glob("*.sty"), *doc_root.glob("*.tex")])
     for path in candidates:
         if any(loads.search(l) for l in _live_lines(path.read_text(encoding="utf-8",

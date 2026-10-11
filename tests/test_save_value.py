@@ -104,6 +104,13 @@ def test_string_value_passes_through_unchanged():
         "$\\sim$3 weeks"
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_non_finite_value_is_refused(value):
+    """A NaN from a failed computation would otherwise read "nan" in the compiled prose."""
+    with pytest.raises(ValueError, match="not finite"):
+        format_value(value)
+
+
 def test_unknown_fmt_is_refused():
     """A typo such as fmt="percentage" must not silently render the bare number."""
     with pytest.raises(ValueError, match="fmt"):
@@ -218,6 +225,16 @@ def test_no_warning_when_the_settings_file_loads_it(document):
     settings.write_text(settings.read_text(encoding="utf-8")
                         + "\\InputIfFileExists{Sections/Results/values.tex}{}{}\n",
                         encoding="utf-8")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert check_values_loaded(document / "Sections" / "Results") is None
+
+
+@pytest.mark.parametrize("line", ["\\input{Sections/Results/values}",
+                                  "\\InputIfFileExists{Sections/Results/values}{}{}"])
+def test_loading_line_without_the_extension_counts(document, line):
+    """LaTeX adds .tex itself, so the usual spelling must not draw a false warning."""
+    (document / "main.tex").write_text(line + "\n", encoding="utf-8")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert check_values_loaded(document / "Sections" / "Results") is None
