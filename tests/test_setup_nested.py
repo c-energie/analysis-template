@@ -230,3 +230,17 @@ def test_create_uses_the_template_privately_and_moves_the_clone_into_place(
     assert layout(host)["nested_remote"] == "https://github.com/someone/writing.git"
     assert sorted(p.name for p in host.iterdir()) == [
         ".gitignore", "layout.toml", "setup_nested.py", "writing"]
+
+
+@pytest.mark.parametrize("nested_dir", ["../sibling", "/abs/doc"])
+def test_restore_refuses_a_layout_whose_nested_dir_escapes_the_host(host, git_env, nested_dir):
+    """A hand-edited nested_dir is restored from without --dir's check unless read_layout()
+    makes it: `../sibling` would be cloned outside the host and gitignored as `/../sibling/`."""
+    (host / "layout.toml").write_text(
+        f'layout = "analysis-hosts-writing"\nnested_dir = "{nested_dir}"\n'
+        'nested_remote = "https://example.invalid/doc.git"\n', encoding="utf-8")
+    before = snapshot(host.parent)
+    result = run(host, git_env)
+    assert result.returncode != 0
+    assert "nested_dir" in result.stderr and "inside this repo" in result.stderr
+    assert snapshot(host.parent) == before

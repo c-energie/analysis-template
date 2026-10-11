@@ -83,6 +83,12 @@ def read_layout():
              f"only sets up {LAYOUT!r}.")
     if not isinstance(data.get("nested_dir"), str) or not data["nested_dir"].strip():
         fail(f"{LAYOUT_FILE.name}: `nested_dir` is missing.")
+    # The same check as --dir, and as doc_analysis's reader: a hand-edited `../x` would
+    # otherwise be restored by cloning outside this repo, and gitignored as `/../x/`.
+    try:
+        checked_dir(data["nested_dir"])
+    except argparse.ArgumentTypeError as exc:
+        fail(f"{LAYOUT_FILE.name}: nested_dir {exc}")
     return data
 
 
