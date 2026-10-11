@@ -24,7 +24,8 @@ matplotlib figure is covered by both checks exactly as a plotly one is.
 
 The LaTeX repo is an input, located via the DOC_REPO environment variable (the
 same convention the publishing agent uses), else — in the nested layout — via the
-committed layout.toml, this repo's or, when this repo is the nested one, its host's. This package never hardcodes a user path.
+committed layout.toml: this repo's or, when this repo is the nested one, its host's.
+This package never hardcodes a user path.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
