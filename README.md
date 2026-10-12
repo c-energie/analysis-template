@@ -305,8 +305,8 @@ ROOT = notebook_setup()
 `notebooks/` on `sys.path` (so a helper module kept beside the notebooks imports from any
 sub-folder) and moves to this repo's root, which it returns. It finds the repo through the
 installed package, not the working directory — so the one thing that matters is that the
-kernel runs **the venv `doc_analysis` is installed into**. In a document workspace that is
-the workspace root's `.venv`; standalone, this repo's own:
+kernel runs **the venv `doc_analysis` is installed into**: this repo's own `.venv`, whether
+it stands alone or is nested in its document repo:
 
 | | Interpreter |
 |---|---|
@@ -319,12 +319,13 @@ and writes into its document.
 - **JupyterLab**: `uv run jupyter lab` from this repo. `uv run` uses the right venv, so
   there is nothing to select.
 - **VS Code**: *Python: Select Interpreter* → the path above, then pick it as the
-  notebook's kernel (top right). Opening the workspace root as the folder is fine.
+  notebook's kernel (top right). Opening the document repo or the project workspace as the
+  folder is fine.
 - **PyCharm**: *Settings → Project: <name> → Python Interpreter → Add Interpreter → Add
   Local Interpreter → select existing* → the path above. Opening
-  the whole workspace as the project is fine — that case is what `notebook_setup()` exists
-  for: the kernel starts at the workspace root, below which the old upward search never
-  found this repo.
+  the document repo or the whole project workspace as the project is fine — that case is
+  what `notebook_setup()` exists for: the kernel starts above this repo, where the old
+  upward search never found it.
 - **marimo** (`--extra marimo`): `uv run marimo edit notebooks/<section>/<name>.py` from
   this repo; headless, `uv run marimo export html notebooks/<section>/<name>.py -o out.html`,
   which runs every cell exactly as the editor does.
