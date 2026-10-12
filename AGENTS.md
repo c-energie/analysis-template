@@ -117,9 +117,9 @@ flags), and it deletes itself when done. In a downstream repo it has already run
 ### Workspace skills (Claude Code)
 
 `.claude/settings.json` enables the `project-workspace@c-energie` plugin, auto-updating: the
-document-workspace setup and adapt skills, e.g. `/project-workspace:adapt-existing-analysis`.
-They expect to run from the workspace root (the directory holding `workspace.toml`), not from
-inside this repo.
+project-workspace setup and adapt skills, e.g. `/project-workspace:adapt-existing-analysis`.
+They act on one document: the one the session is inside (this repo, nested in its document
+repo), or one picked from a project workspace's `workspace.toml`.
 
 ### Issue tracker
 
