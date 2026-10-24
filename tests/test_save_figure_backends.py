@@ -190,6 +190,110 @@ def test_static_scale_reaches_write_image(document, kaleido):
     assert fig.image_kwargs["scale"] == 3
 
 
+# --------------------------------------------------------------- browser close (#22)
+
+CLOSE_FAILURE = "Couldn't close or kill browser subprocess"
+
+
+def choreographer_raise(message=CLOSE_FAILURE):
+    """Raise RuntimeError from a frame whose file sits in a choreographer package.
+
+    Compiled under that filename rather than importing choreographer, so the suite stays
+    on a bare install; the saver only ever looks at where the error came from.
+    """
+    namespace = {}
+    code = "def _close(message):\n    raise RuntimeError(message)\n"
+    exec(compile(code, str(Path("site-packages", "choreographer", "browser_async.py")),
+                 "exec"), namespace)
+    namespace["_close"](message)
+
+
+def complete_png():
+    return png_bytes() + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+class FlakyClosePlotlyFigure(FakePlotlyFigure):
+    """write_image raises from choreographer on its first `failures` calls.
+
+    `written` is what each failing call leaves on disk first: the whole PNG (the race in
+    the issue), a truncated one, or nothing.
+    """
+
+    def __init__(self, failures=1, written=None, error=choreographer_raise):
+        super().__init__(hovertemplate="x")
+        self.failures, self.written, self.error = failures, written, error
+        self.calls = 0
+
+    def write_image(self, path, **kwargs):
+        self.calls += 1
+        if self.calls > self.failures:
+            return super().write_image(path, **kwargs)
+        if self.written is not None:
+            Path(path).write_bytes(self.written)
+        self.error()
+
+
+def test_close_failure_after_a_complete_png_does_not_fail_the_save(document, kaleido):
+    """The issue's race: the PNG is on disk when choreographer fails to kill Chrome.
+
+    Raising there stopped an unattended nbconvert run over a figure that was written.
+    """
+    _, html_dir, _ = document
+    fig = FlakyClosePlotlyFigure(written=complete_png())
+    with pytest.warns(UserWarning, match="browser-close"):
+        path = save(fig, document)
+
+    assert fig.calls == 1
+    assert path.read_bytes() == complete_png()
+    assert "Fig: example_scatter" in manifest_of(html_dir)
+
+
+def test_close_failure_with_no_png_retries_once(document, kaleido):
+    fig = FlakyClosePlotlyFigure(written=None)
+    path = save(fig, document)
+    assert fig.calls == 2
+    assert path.exists()
+
+
+def test_close_failure_does_not_accept_a_truncated_png(document, kaleido):
+    """A browser killed mid-write leaves a PNG that exists and is non-empty, but broken."""
+    fig = FlakyClosePlotlyFigure(written=complete_png()[:20])
+    save(fig, document)
+    assert fig.calls == 2
+
+
+def test_close_failure_does_not_accept_a_stale_committed_png(document, kaleido):
+    """A figure from the last run exists and is complete, but this call did not write it.
+
+    Checking only "exists and non-empty" would report the old figure as regenerated.
+    """
+    section, _, _ = document
+    stale = section / "Figures" / "example_scatter.png"
+    stale.parent.mkdir()
+    stale.write_bytes(complete_png())
+    fig = FlakyClosePlotlyFigure(written=None)
+    save(fig, document)
+    assert fig.calls == 2
+
+
+def test_close_failure_twice_raises(document, kaleido):
+    fig = FlakyClosePlotlyFigure(failures=2, written=None)
+    with pytest.raises(RuntimeError, match="close or kill"):
+        save(fig, document)
+    assert fig.calls == 2
+
+
+def test_runtime_error_outside_choreographer_is_not_retried(document, kaleido):
+    """Only the browser driver's failure is worked around; anything else is real."""
+    def plain():
+        raise RuntimeError("something else")
+
+    fig = FlakyClosePlotlyFigure(written=complete_png(), error=plain)
+    with pytest.raises(RuntimeError, match="something else"):
+        save(fig, document)
+    assert fig.calls == 1
+
+
 # --------------------------------------------------------------- together
 
 def test_one_parity_baseline_covers_both_backends(document, kaleido, tmp_path):

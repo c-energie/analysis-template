@@ -460,7 +460,62 @@ def _write_static_png(fig, save_path, **write_image_kwargs):
             "the plotly extra installs:\n"
             "    uv sync --extra plotly    (or: uv add kaleido / pip install kaleido)"
         ) from exc
-    fig.write_image(str(save_path), **write_image_kwargs)
+    before = _file_state(save_path)
+    try:
+        fig.write_image(str(save_path), **write_image_kwargs)
+    except RuntimeError as exc:
+        if not _raised_by_choreographer(exc):
+            raise
+        # kaleido 1.x renders through choreographer, whose Chrome teardown races on
+        # Windows: "Couldn't close or kill browser subprocess" is raised from
+        # Browser._close *after* the PNG is on disk (issue #22). Failing the save there
+        # stops an unattended nbconvert run over a figure that was written. But a PNG
+        # merely existing proves nothing - a committed figure from the last run is
+        # there too - so accept only one this call wrote, completely; else retry once.
+        if _png_written_since(save_path, before):
+            warnings.warn(
+                f"Ignored a browser-close failure after writing '{save_path.name}' "
+                f"(kaleido/choreographer: {exc}). The PNG is complete.",
+                stacklevel=3,
+            )
+            return
+        fig.write_image(str(save_path), **write_image_kwargs)
+
+
+def _file_state(path):
+    """(mtime_ns, size) of path, or None if absent - to tell a fresh write from a stale file."""
+    try:
+        stat = Path(path).stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _raised_by_choreographer(exc):
+    """True if the traceback passes through choreographer, kaleido's browser driver.
+
+    The close failure is a bare RuntimeError, so its type says nothing; where it came
+    from does. Any other RuntimeError from write_image is a real failure and propagates.
+    """
+    tb = exc.__traceback__
+    while tb is not None:
+        if "choreographer" in Path(tb.tb_frame.f_code.co_filename).parts:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def _png_written_since(path, before):
+    """True if path now holds a complete PNG that differs from the `before` state.
+
+    Complete means the signature at the start and the IEND chunk at the end, so a file
+    truncated by a browser killed mid-write is not mistaken for a finished figure.
+    """
+    after = _file_state(path)
+    if after is None or after == before or after[1] == 0:
+        return False
+    data = Path(path).read_bytes()
+    return data.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in data[-12:]
 
 
 def _matplotlib_figure():
