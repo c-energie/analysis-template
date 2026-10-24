@@ -256,22 +256,26 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     # Read without newline translation, so a rewrite below can leave every byte outside
     # the inserted block exactly as it was.
     existing = tex_path.read_bytes().decode("utf-8")
+    # Follow the file's own line endings rather than the platform's, in both branches: a
+    # text-mode write turns \n into \r\n on Windows, and an LF section came back with a
+    # CRLF block in it -- mixed endings, and noisy git and Overleaf diffs (issue #17).
+    newline = "\r\n" if "\r\n" in existing else "\n"
+    commented = commented.replace("\n", newline)
     end = _end_document_offset(existing)
     if end is None:
-        existing = tex_path.read_text(encoding="utf-8")
-        separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
-        with tex_path.open("a", encoding="utf-8") as tex_file:
-            tex_file.write(f"{separator}{commented}\n")
+        # Decide the separator on normalised endings: a CRLF file ending in a blank line
+        # ends in "\r\n\r\n", which endswith("\n\n") would miss.
+        tail = existing.replace("\r\n", "\n")
+        blank_lines = 0 if tail.endswith("\n\n") else 1 if tail.endswith("\n") else 2
+        # Append bytes, so nothing already in the file is re-encoded or translated.
+        with tex_path.open("ab") as tex_file:
+            tex_file.write(f"{newline * blank_lines}{commented}{newline}".encode("utf-8"))
     else:
         # A subfile ends in \end{document}, and LaTeX ignores everything after it: a block
         # appended there is uncommented by the author and then never renders, with no
-        # error (issue #4). Insert it before the line instead.
-        # The whole file is rewritten, so follow its line endings rather than the
-        # platform's: a CRLF document must not come back half LF, or wholly CRLF on Windows.
-        newline = "\r\n" if "\r\n" in existing else "\n"
+        # error (issue #4). Insert it before the line instead, rewriting the whole file.
         body = existing[:end].rstrip("\r\n")
         separator = newline * 2 if body else ""
-        commented = commented.replace("\n", newline)
         tex_path.write_bytes(
             f"{body}{separator}{commented}{newline * 2}{existing[end:]}".encode("utf-8"))
 

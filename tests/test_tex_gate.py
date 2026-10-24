@@ -271,6 +271,27 @@ def test_crlf_file_keeps_crlf_line_endings(tmp_path):
     assert raw.endswith("% \\end{figure}\r\n\r\n\\end{document}\r\n")
 
 
+def test_crlf_fragment_keeps_crlf_line_endings(tmp_path):
+    """The append branch wrote the block in the platform's endings, not the file's: an LF
+    section on Windows came back with a CRLF block, and a CRLF one elsewhere with an LF
+    block -- mixed endings either way (issue #17)."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\r\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    raw = tex.read_bytes().decode("utf-8")
+    assert "\n" not in raw.replace("\r\n", "")
+    assert raw.startswith("Some prose.\r\n\r\n% \\begin{figure}[H]\r\n")
+    assert raw.endswith("% \\end{figure}\r\n")
+
+
+def test_crlf_fragment_ending_in_blank_line_gets_no_extra_one(tmp_path):
+    """A CRLF file already ending in a blank line ends in \\r\\n\\r\\n, which a check for
+    "\\n\\n" misses: the block would be appended after two blank lines instead of one."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\r\n\r\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    raw = tex.read_bytes().decode("utf-8")
+    assert raw.startswith("Some prose.\r\n\r\n% \\begin{figure}[H]\r\n")
+
+
 # --------------------------------------------------------------- real repo
 
 @pytest.mark.skipif(not os.environ.get("DOC_REPO"),
