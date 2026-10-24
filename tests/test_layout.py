@@ -218,6 +218,9 @@ def test_a_renamed_nested_checkout_gets_no_fallback_and_the_error_names_both(hos
     """A host naming another directory nests some other repo, or this one was renamed;
     guessing the parent then could write figures into a document that is not ours."""
     renamed = hosted / "thesis-analysis-old"
+    # The fixture's cwd is the checkout itself, and Windows refuses to rename a directory
+    # that is any process's cwd (WinError 32): step out first, then back into the new name.
+    os.chdir(hosted)
     (hosted / "my-thesis-analysis").rename(renamed)
     os.chdir(renamed)
     with pytest.raises(RuntimeError, match="DOC_REPO is not set") as raised:
