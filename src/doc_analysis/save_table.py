@@ -83,9 +83,10 @@ def _library_reference_path(section_dir, library_name=LIBRARY_NAME):
     sections_root = search_root(section_dir)
     if sections_root.name not in (SECTIONS_DIRNAME, LEGACY_SECTIONS_DIRNAME):
         return library_name
-    doc_root = sections_root.parent
-    return (Path(section_dir).resolve().relative_to(doc_root.resolve())
-            / library_name).as_posix()
+    # Lexical, not resolved: sections_root is an ancestor of section_dir by construction,
+    # so this cannot fail, whereas resolving a symlinked section follows it out of the
+    # document and raises after tables.tex is already written. TeX sees the link's path.
+    return (Path(section_dir).relative_to(sections_root.parent) / library_name).as_posix()
 
 
 def _build_table_block(tabular_latex, caption, label):

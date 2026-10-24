@@ -196,6 +196,25 @@ def test_table_snippet_path_in_a_pre_rename_document(tmp_path):
             in tex.read_text(encoding="utf-8"))
 
 
+def test_table_snippet_path_through_a_symlinked_section(tmp_path):
+    """A section symlinked in from outside the document is referenced by the path TeX
+    sees from the root; resolving it first escaped the root and raised after tables.tex
+    was already written."""
+    target = tmp_path / "elsewhere" / "ptg"
+    target.mkdir(parents=True)
+    (target / "ptg.tex").write_text("", encoding="utf-8")
+    sections = tmp_path / "doc" / "Sections"
+    sections.mkdir(parents=True)
+    try:
+        (sections / "ptg").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks not permitted here")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=sections / "ptg")
+    assert ("\\ExecuteMetaData[Sections/ptg/tables.tex]{fresh_tag}"
+            in (target / "ptg.tex").read_text(encoding="utf-8"))
+
+
 def test_table_snippet_outside_a_document_keeps_the_bare_name(tmp_path):
     """With no Sections/ ancestor there is no document root to be relative to."""
     tex = tmp_path / "section.tex"
