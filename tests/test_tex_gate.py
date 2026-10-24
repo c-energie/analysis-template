@@ -170,6 +170,40 @@ def test_table_snippet_is_appended_once(tmp_path):
     assert (tmp_path / "tables.tex").read_text(encoding="utf-8").count("%<*fresh_tag>") == 1
 
 
+def test_table_snippet_path_is_relative_to_the_document_root(tmp_path):
+    """Sections are \\subfile-d into main.tex, so TeX resolves the library path from the
+    document root: a bare `tables.tex` rendered nothing in the full build (issue #23)."""
+    section = tmp_path / "doc" / "Sections" / "Results" / "ptg"
+    section.mkdir(parents=True)
+    tex = section / "ptg.tex"
+    tex.write_text("", encoding="utf-8")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=section)
+    text = tex.read_text(encoding="utf-8")
+    assert "\\ExecuteMetaData[Sections/Results/ptg/tables.tex]{fresh_tag}" in text
+    assert "[tables.tex]" not in text
+
+
+def test_table_snippet_path_in_a_pre_rename_document(tmp_path):
+    """A document still laid out under Chapters/ gets the path it actually has."""
+    section = tmp_path / "doc" / "Chapters" / "Intro"
+    section.mkdir(parents=True)
+    tex = section / "intro.tex"
+    tex.write_text("", encoding="utf-8")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=section)
+    assert ("\\ExecuteMetaData[Chapters/Intro/tables.tex]{fresh_tag}"
+            in tex.read_text(encoding="utf-8"))
+
+
+def test_table_snippet_outside_a_document_keeps_the_bare_name(tmp_path):
+    """With no Sections/ ancestor there is no document root to be relative to."""
+    tex = tmp_path / "section.tex"
+    tex.write_text("", encoding="utf-8")
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=tmp_path)
+    assert "\\ExecuteMetaData[tables.tex]{fresh_tag}" in tex.read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------- \end{document}
 
 SUBFILE = ("\\documentclass[../../main.tex]{subfiles}\n"
