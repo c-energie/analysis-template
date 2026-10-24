@@ -157,10 +157,10 @@ save_fig(fig, "ptg_detail.png", documents=["paper"])     # paper only
 
 A name in `documents=` that is not a target raises: it narrows, never adds. Every chosen
 target is checked before anything is written, so a save that cannot land in all of them —
-one lacks the section, or another analysis owns the name there — lands in none. An empty
-list (`"documents": []`) is [no-document mode](#no-document-yet). A nested analysis is
-unaffected: its `layout.toml` names its one document, whether or not the workspace lists
-it too.
+one lacks the section, has several `.tex` files and no `tex=`, or another analysis owns
+the name there — lands in none. An empty list (`"documents": []`) is
+[no-document mode](#no-document-yet). A nested analysis is unaffected: its `layout.toml`
+names its one document, whether or not the workspace lists it too.
 
 **Ownership.** One document can be fed by its nested analysis and several workspace
 analyses, and the bare filename is the key LaTeX, the manifest and publishing share, so

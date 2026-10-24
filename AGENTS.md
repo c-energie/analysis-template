@@ -42,9 +42,10 @@ the name in `<document>/figures_manifest.json`. Nothing it writes shows up in th
   `save_value` (and the `save_document_*` workers) write to every target by default;
   `documents=["paper"]` picks a subset by the `workspace.json` entry (else the document's
   directory name). A name that is not a target raises. Every chosen target is checked
-  before anything is written: one missing the section, or one where another analysis owns
-  the name, fails the whole save. Never create a section directory in a document to make
-  a save pass — the section is the author's.
+  before anything is written: one missing the section, one with several `.tex` files and
+  no `tex=`, or one where another analysis owns the name, fails the whole save. Never
+  create a section directory in a document to make a save pass — the section is the
+  author's.
 - **Names have owners.** The first analysis to write a figure filename (or label), table
   tag or value macro into a document owns it there; the manifest entry's `analysis` says
   who (a workspace analysis's member `dir`, else its directory name). A save from another

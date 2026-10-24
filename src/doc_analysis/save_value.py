@@ -34,6 +34,7 @@ from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _check_tex_targets,
     _check_owners,
     _local_section_dir,
     _one_of,
@@ -299,6 +300,12 @@ def save_document_value(name, value, fmt=None, decimals=2, unit=None, scale=None
         _check_owners(plan._replace(targets=(target,)), f"The value \\{macro} ({name!r})",
                       _release_block(library_name, name),
                       keys=(key, *_tag_keys(target, library_path, name)))
+    if add_reference:
+        _check_tex_targets(
+            plan, tex,
+            lambda section_dir: find_value_reference(
+                section_dir, macro, exclude={library_name}) is not None,
+            exclude={library_name})
 
     written = []
     for target in plan.targets:

@@ -335,6 +335,25 @@ def test_a_target_missing_the_section_fails_the_save_before_any_write(ws):
     assert not (ws.paper / "Sections" / SECTION).exists()
 
 
+
+def test_a_target_with_several_tex_files_fails_the_save_before_any_write(ws):
+    """The ambiguous-.tex check runs for every target up front too: thesis must not get
+    a figure, table or value whose block paper then cannot place."""
+    (ws.paper / "Sections" / SECTION / "other.tex").write_text("More.\n", encoding="utf-8")
+    before = tex(ws.thesis)
+    save_fig, save_table, save_value = savers(ws.validation)
+    for save in (lambda **kw: save_fig(FakeMatplotlibFigure(), "ptg_scatter.png", **kw),
+                 lambda **kw: save_table(pd.DataFrame({"a": [1.0]}), "ptg_summary", **kw),
+                 lambda **kw: save_value(1, "ptg_count", **kw)):
+        with pytest.raises(RuntimeError, match="several .tex files"):
+            save()
+    assert sorted(p.name for p in (ws.thesis / "Sections" / SECTION).iterdir()) == ["ptg.tex"]
+    assert tex(ws.thesis) == before
+    assert not (ws.thesis / MANIFEST_NAME).exists() and not (ws.paper / MANIFEST_NAME).exists()
+    # tex=False needs no .tex at all, so the same saves then go through.
+    save_fig(FakeMatplotlibFigure(), "ptg_scatter.png", tex=False)
+    assert figure(ws.thesis).exists() and figure(ws.paper).exists()
+
 # --------------------------------------------------------------- ownership
 
 

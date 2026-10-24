@@ -9,6 +9,7 @@ from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _check_tex_targets,
     _check_owners,
     _document_relative,
     _local_section_dir,
@@ -221,6 +222,12 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
     if plan is not None:
         _check_owners(plan, f"The table {tag!r}", _release_block(library_name, tag),
                       keys=(key,))
+        if add_reference:
+            _check_tex_targets(
+                plan, tex,
+                lambda section_dir: find_table_reference(
+                    section_dir, tag, exclude={library_name}) is not None,
+                exclude={library_name})
 
     tabular = dataframe_to_latex(df, index=index, decimals=decimals, escape=escape,
                                  column_format=column_format, **to_latex_kwargs)

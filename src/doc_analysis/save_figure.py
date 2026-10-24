@@ -513,6 +513,51 @@ def _comment_block(block):
     return "\n".join(f"% {line}" if line else "%" for line in block.splitlines())
 
 
+def _choose_tex(section_dir, exclude=(), tex_name=None):
+    """The name of the .tex file in section_dir a reference goes to; None if it has none.
+
+    tex_name picks it explicitly; otherwise a single candidate is used and several raise.
+    Separate from _append_commented_block so a save into several documents can ask every
+    target before writing to any (see _check_tex_targets): raising for the second after
+    the first was written would leave the two documents disagreeing.
+    """
+    exclude = set(exclude) | set(GENERATED_TEX_NAMES)
+    tex_names = sorted(p.name for p in Path(section_dir).glob("*.tex")
+                       if p.name not in exclude)
+    if not tex_names:
+        return None
+    if tex_name is not None:
+        if tex_name not in tex_names:
+            raise FileNotFoundError(
+                f"tex file {tex_name!r} not found in {section_dir} (has: {tex_names})"
+            )
+        return tex_name
+    if len(tex_names) == 1:
+        return tex_names[0]
+    # Ambiguous target. Raise rather than prompt: an input() here hangs an unattended
+    # notebook run, and silently picking one risks dropping the block in the wrong
+    # section file. The message says exactly how to resolve it.
+    raise RuntimeError(
+        f"{Path(section_dir).name} has several .tex files ({tex_names}); "
+        f"pass tex='<one of them>' to say where the reference should go "
+        f"(or tex=False to skip appending one)."
+    )
+
+
+def _check_tex_targets(plan, tex, referenced, exclude=()):
+    """Raise before any write when a target's section has no clear .tex for the reference.
+
+    `referenced(section_dir)` says whether the section already references the artefact,
+    in which case nothing will be appended there and its .tex files do not matter.
+    """
+    if tex is False:
+        return
+    for target in plan.targets:
+        if not referenced(target.section_dir):
+            _choose_tex(target.section_dir, exclude,
+                        None if tex in (None, True) else tex)
+
+
 def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     """Append a commented-out LaTeX block to a .tex file in section_dir.
 
@@ -528,28 +573,10 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     no eligible .tex file.
     """
     section_dir = Path(section_dir)
-    exclude = set(exclude) | set(GENERATED_TEX_NAMES)
-    tex_names = sorted(p.name for p in section_dir.glob("*.tex") if p.name not in exclude)
-    if not tex_names:
+    tex_name = _choose_tex(section_dir, exclude, tex_name)
+    if tex_name is None:
         print(f"No .tex file found in {section_dir}; skipping reference.")
         return None
-
-    if tex_name is not None:
-        if tex_name not in tex_names:
-            raise FileNotFoundError(
-                f"tex file {tex_name!r} not found in {section_dir} (has: {tex_names})"
-            )
-    elif len(tex_names) == 1:
-        tex_name = tex_names[0]
-    else:
-        # Ambiguous target. Raise rather than prompt: an input() here hangs an
-        # unattended notebook run, and silently picking one risks dropping the block
-        # in the wrong section file. The message says exactly how to resolve it.
-        raise RuntimeError(
-            f"{section_dir.name} has several .tex files ({tex_names}); "
-            f"pass tex='<one of them>' to say where the reference should go "
-            f"(or tex=False to skip appending one)."
-        )
 
     tex_path = section_dir / tex_name
     commented = _comment_block(block)
@@ -949,6 +976,10 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
                             f"{_document_relative(target, target.section_dir / FIGURES_DIRNAME / file_name)}"
                             f" (and its \\begin{{figure}} block) from the document"),
             keys=(key,), stem=stem)
+        _check_tex_targets(
+            plan, tex,
+            lambda section_dir: find_figure_reference(section_dir, file_name,
+                                                      label) is not None)
 
     # No document: one flat outputs/figures/, not one per section, because the bare
     # filename is the key everywhere downstream and a section tree would only invite two
