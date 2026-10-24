@@ -147,10 +147,14 @@ def analysis_root():
     """The directory the tooling's own files hang off, resolved now, not at import.
 
     `figures_config.toml`, `figures_html/` and the parity baseline belong to the active
-    checkout. With none — a wheel install run outside any checkout — this is where they
-    have always defaulted to, two levels above the package.
+    checkout. Outside every checkout, the one `notebook_setup()` recorded comes before the
+    installed one, as it does for `document_repo()`: a cell that moved to a data directory
+    otherwise sent a shadowed checkout's figures into its own document but gated them by,
+    and recorded them in, the installed checkout. With none — a wheel install run outside
+    any checkout — this is where they have always defaulted to, two levels above the package.
     """
-    return active_checkout() or Path(__file__).resolve().parents[2]
+    return (cwd_checkout() or LAST_SEARCH["fallback"] or checkout_root()
+            or Path(__file__).resolve().parents[2])
 
 
 def load_env(start=None, override=False, fallback=None, skipped_checkout=None):

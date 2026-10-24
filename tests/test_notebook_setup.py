@@ -250,3 +250,18 @@ def test_inside_the_installed_checkout_nothing_changes(shared_venv):
     assert document_repo() == shared_venv.a_document
     assert figure_config.config_path() == shared_venv.a / "figures_config.toml"
     assert messages == []
+
+
+def test_leaving_the_checkout_after_setup_keeps_its_config_and_html_dir(shared_venv, tmp_path):
+    """A cell moving to a data directory outside B: document_repo() kept B's document via
+    the recorded checkout, but config and figures_html/ fell back to the installed one, so
+    B's figures were gated by and recorded in another checkout — #24 again."""
+    os.chdir(shared_venv.b / "notebooks")
+    setup_recording_warnings(shared_venv.package_dir)
+    data = tmp_path / "data"
+    data.mkdir()
+    os.chdir(data)
+
+    assert document_repo() == shared_venv.b_document
+    assert figure_config.config_path() == shared_venv.b / "figures_config.toml"
+    assert save_figure.default_html_dir() == shared_venv.b / "figures_html"
