@@ -6,6 +6,7 @@ or is missing from it — so the create path is judged on what it does with gh's
 """
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,21 @@ def git_env(tmp_path):
 
 def git(env, *args, cwd):
     subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+
+def rmtree(path):
+    """Delete a git clone the way a Windows user's machine allows: git writes
+    `.git/objects/**` read-only, and a plain `shutil.rmtree` there fails with
+    `PermissionError: [WinError 5]` (#19). Clear the bit and retry the one call."""
+    def clear_readonly(func, p, _):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+    # `onexc` arrived in 3.12 and `onerror` is deprecated from it; 3.11 still has
+    # only `onerror`, and pyproject allows it.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_readonly)
+    else:
+        shutil.rmtree(path, onerror=clear_readonly)
 
 
 @pytest.fixture
@@ -132,7 +148,7 @@ def test_gitignore_gets_the_entry_exactly_once_across_two_runs(host, document, g
     """Adopting again into the emptied directory must not stack a second line on the
     first: the .gitignore is committed, and a duplicate is noise in someone's diff."""
     assert run(host, git_env, "--from", str(document)).returncode == 0
-    shutil.rmtree(host / "my-study-writing")
+    rmtree(host / "my-study-writing")
     assert run(host, git_env, "--from", str(document)).returncode == 0
     lines = (host / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert lines.count("/my-study-writing/") == 1
@@ -151,7 +167,7 @@ def test_the_layout_is_readable_by_doc_analysis(host, document, git_env, monkeyp
 def test_no_arguments_restores_a_deleted_nested_repo(host, document, git_env):
     """A fresh clone of the host: layout.toml is committed, the nested repo is not."""
     assert run(host, git_env, "--from", str(document)).returncode == 0
-    shutil.rmtree(host / "my-study-writing")
+    rmtree(host / "my-study-writing")
     layout_before = (host / "layout.toml").read_bytes()
 
     result = run(host, git_env)
