@@ -26,7 +26,7 @@ Precedence extends ADR 0001's, strictest first:
 3. this repo's own `layout.toml`;
 4. the host repo's `layout.toml`.
 
-As in ADR 0001, a `DOC_REPO` that disagrees with the derived location still wins, but it warns. `init.py` applies the same rule: in a matching position, it asks for no document path and writes no `.env`, unless `--doc-repo` is given.
+As in ADR 0001, a `DOC_REPO` that disagrees with the derived location still wins, but it warns. (Superseded by ADR 0003: it now raises.) `init.py` applies the same rule: in a matching position, it asks for no document path and writes no `.env`, unless `--doc-repo` is given.
 
 A `nested_dir` that names another directory gives no fallback. The "DOC_REPO is not set" error names both directory names. Matching on the name is the evidence that the host means this repo, rather than some other analysis repo it nests, or this one under an old name. Without that evidence, writing figures into the parent could put them in the wrong document.
 

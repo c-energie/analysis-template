@@ -23,7 +23,9 @@ the document repo knows nothing about Python, and this package never reads your 
 This is a **GitHub template**, not a repository to fork or clone: the copy you run your
 analysis from is your own repository, with its own history and no link back here.
 
-There are two layouts — how this repo and the document repo sit relative to each other:
+There are two layouts — how this repo and the document repo sit relative to each other —
+and, in a project workspace, a third way to be connected to documents
+([several documents](#feeding-several-documents)):
 
 - **Side by side** (the default): two checkouts next to each other, each opened on its own.
   **Do the document repository first.** This one asks for its path during setup, and every
@@ -131,18 +133,61 @@ python setup_nested.py
 
 Until then, saving a figure raises with that command in the message.
 
+### Feeding several documents
+
+In a project workspace an analysis repo can be a **workspace analysis**: a member of the
+workspace in its own right, inside no document, attached to any number of documents.
+`attach-analysis` / `detach-analysis` (the `project-workspace` plugin) record them in the
+workspace's `.claude/workspace.json`:
+
+```json
+{ "dir": "validation", "kind": "analysis", "documents": ["thesis", "paper"] }
+```
+
+`doc_analysis` finds the nearest `.claude/workspace.json` above this repo, this repo's
+member by `dir`, and resolves each entry against the workspace root: those are its
+**target documents** (`target_documents()`). Every save writes into each of them — the
+same PNG and commented block, the same `tables.tex` and `values.tex` blocks — and
+`documents=` narrows one call to a subset:
+
+```python
+save_fig(fig, "ptg_scatter.png")                         # thesis and paper
+save_fig(fig, "ptg_detail.png", documents=["paper"])     # paper only
+```
+
+A name in `documents=` that is not a target raises: it narrows, never adds. Every chosen
+target is checked before anything is written, so a save that cannot land in all of them —
+one lacks the section, or another analysis owns the name there — lands in none. An empty
+list (`"documents": []`) is [no-document mode](#no-document-yet). A nested analysis is
+unaffected: its `layout.toml` names its one document, whether or not the workspace lists
+it too.
+
+**Ownership.** One document can be fed by its nested analysis and several workspace
+analyses, and the bare filename is the key LaTeX, the manifest and publishing share, so
+names are never prefixed. Instead the first analysis to write a figure filename, a table
+tag or a value macro into a document **owns** it there, recorded in the document's
+`figures_manifest.json`. A save of that name from another analysis raises, naming the
+owner; the owner re-saves freely. To give a name up, delete the PNG (or the table's or
+value's block) from the document and run `check-figure-parity --prune`.
+
+**`DOC_REPO`** is then not needed. If `.env` sets one — `setup-doc-publish` does, for
+doc-publish — it must name one of the targets, which changes nothing; naming any other
+directory raises, quoting both ([ADR 0003](docs/adr/0003-target-documents-from-workspace.md)).
+The same holds in the nested layout.
+
 ### No document yet
 
 An analysis can come before its write-up, or be shared before any document is chosen.
 With **nothing** naming a document — no `DOC_REPO` in the environment or a `.env`, no
-`layout.toml` here, no host `layout.toml` naming this directory — this repo runs in
-**no-document mode**: `document_repo()` returns `None`, and the same notebooks save into
+`layout.toml` here, no host `layout.toml` naming this directory, no workspace member
+listing documents — or with a workspace member whose `documents` is `[]`, this repo runs
+in **no-document mode**: `document_repo()` returns `None`, and the same notebooks save into
 this repo's own `outputs/` (gitignored) instead of raising:
 
 | Saved | Where, with no document |
 |---|---|
 | figure PNG | `outputs/figures/<name>.png` — the same bare filename, never prefixed |
-| interactive HTML, manifest | `figures_html/`, as always; the manifest's `static` names the local PNG |
+| interactive HTML, manifest | `figures_html/`; the manifest's `static` names the local PNG |
 | `tables.tex`, `values.tex` | `outputs/<section>/` |
 | `\begin{figure}` block, table and value references | nothing: there is no prose to put them in |
 
@@ -205,9 +250,12 @@ its `DOC_REPO`. In the [nested layout](#nesting-the-document-inside-this-repo), 
 setting it, `DOC_REPO` comes from `layout.toml`; and when this repo is itself nested
 inside the document repo — the parent's `layout.toml` declares `writing-hosts-analysis`
 and names this directory as `nested_dir` — it is that parent, so `init.py` asks for no
-path ([ADR 0002](docs/adr/0002-doc-repo-from-host-layout.md)). One that disagrees with
-either still wins, and warns. **A variable already set in your shell wins**, which keeps CI and one-off
-overrides working:
+path ([ADR 0002](docs/adr/0002-doc-repo-from-host-layout.md)). A workspace analysis gets
+its documents from `.claude/workspace.json` the same way
+([several documents](#feeding-several-documents)). Where a layout or the workspace names
+the document, a `DOC_REPO` naming anything else raises rather than overriding it
+([ADR 0003](docs/adr/0003-target-documents-from-workspace.md)). **A variable already set
+in your shell wins** over `.env`, which keeps CI and one-off overrides working:
 
 ```bash
 DOC_REPO=/tmp/scratch pytest tests -q
@@ -412,14 +460,21 @@ that is the whole point, that turning one artefact off never means editing a not
 ```bash
 check-figure-parity --snapshot   # record current figure dimensions as the baseline
 check-figure-parity              # ...and fail if any has since drifted
-check-figure-parity --prune      # drop manifest entries (and HTML) whose PNG was deleted
-check-figure-parity --figures    # which saved figures the document actually renders
+check-figure-parity --prune      # drop manifest entries (and HTML) whose PNG or block is gone
+check-figure-parity --figures    # which saved figures each document actually renders
 pytest tests -q
 ```
 
 The last one catches the quiet failure: a figure can be regenerated perfectly and still be
 invisible in the PDF because its `\begin{figure}` block was never written or is still
 commented out.
+
+The check runs **per analysis, over all its target documents**: `--snapshot` records this
+analysis's own figures in each, keyed by document (`{"documents": {"thesis": {...}}}`, each
+path relative to its document), and the default check compares every one. A baseline from
+before it was keyed by document is still read, as the baseline of the only target.
+`--figures` reports over a document's whole manifest — every analysis feeding it — and
+`--prune` also drops a stale entry another analysis owns, which is what releases its name.
 
 In [no-document mode](#no-document-yet) `--snapshot` and the default check run against
 `outputs/`, and the baseline records `"target": "local"`. Checking a local baseline once
@@ -448,17 +503,19 @@ These are the ones worth knowing before you lose an afternoon.
 
 ## Architecture
 
-`src/doc_analysis/`, thirteen modules:
+`src/doc_analysis/`, fifteen modules:
 
 | Module | What it does |
 |---|---|
 | `env.py` | Reads a `.env` into the environment on import — `$DOC_ENV`, else the nearest above the cwd — without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
 | `layout.py` | Reads `layout.toml`, which in the nested layout puts the document repo at `<root>/<nested_dir>`, and — the other way up — the host document repo's, which makes the parent the document when it names this directory: `document_repo()`'s last two fallbacks. Stdlib `tomllib`. |
+| `workspace.py` | Reads `.claude/workspace.json`: this repo's `kind: "analysis"` member, matched by `dir`, and its `documents`, each resolved against the workspace root. Read-only; ignores the keys other plugins own. Stdlib `json`. |
 | `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the active checkout's `.env` (the cwd's, else the installed one), styles the backend, chdirs to the repo root. |
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |
-| `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Sections/<section>/Figures/` (`outputs/figures/` with no document), a manifest entry, and — for a plotly figure — the interactive HTML. Also `document_repo()` and `local_output_dir()`, which all three savers and the parity check share. |
+| `save_figure.py` | `save_document_figure()`: PNG into each target's `Sections/<section>/Figures/` (`outputs/figures/` with no document), a manifest entry, and — for a plotly figure — the interactive HTML. Also `target_documents()` (with `document_repo()`, its single-document view) and `local_output_dir()`, which all three savers and the parity check share. |
+| `manifest.py` | `figures_manifest.json`: atomic writes, ownership checks, and the one-time move of a pre-ADR-0003 manifest from `figures_html/` into the document. |
 | `save_table.py` | `save_document_table()`: booktabs LaTeX into a per-section `tables.tex`, tagged so re-saving replaces in place. |
 | `save_value.py` | `save_document_value()`: a scalar as a LaTeX macro in a per-section `values.tex`, tagged like `tables.tex`; warns when the document does not load the file. |
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |
@@ -472,8 +529,19 @@ the publishing engine reads as "use the PNG". It covers **every** figure this pi
 writes, which is what makes both `check-figure-parity` modes work whichever backend you
 chose. HTML is written with `include_plotlyjs="directory"` so exports work offline.
 
-It lives in `figures_html/` (or `$FIGURES_HTML_DIR`). On matplotlib that directory holds
-the manifest and nothing else — the name is for what it usually contains.
+In a document it lives at the **document's root** — where doc-publish looks for it — and
+is shared by every analysis feeding that document. Each entry records its owner
+(`analysis`), and beside the `"Fig: <label>"` entries sit `"Tab: <tag>"` and
+`"Val: <macro>"` ones, which doc-publish ignores. Paths are relative to the manifest file:
+`static` to the PNG in the document, `interactive` to the HTML, which stays in this repo's
+`figures_html/` (or `$FIGURES_HTML_DIR`), e.g. `../my-analysis/figures_html/x.html`. It is
+written to a temp file and renamed, so two notebooks saving at once cannot tear it. The
+first save into a document moves this repo's older entries for it out of
+`figures_html/figures_manifest.json`, printing one line.
+
+With no document, or for a save into an explicit absolute `section=`, the manifest stays in
+`figures_html/`. On matplotlib that directory then holds the manifest and nothing else —
+the name is for what it usually contains.
 
 ## Publishing the document
 

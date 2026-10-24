@@ -9,37 +9,62 @@ which is what an agent needs before it runs anything.
 
 ## This package writes into a different repository
 
-`doc_analysis` exists to write into the LaTeX document repo, located by `DOC_REPO`.
-`save_document_figure()` creates `$DOC_REPO/Sections/<section>/Figures/<name>.png` and
+`doc_analysis` exists to write into LaTeX document repos — this analysis's **target
+documents** (`target_documents()`, `src/doc_analysis/save_figure.py`).
+`save_document_figure()` creates `<document>/Sections/<section>/Figures/<name>.png` and
 appends to a `.tex` file beside it; `save_document_table()` rewrites a section's
-`tables.tex`, and `save_document_value()` (`save_value`) its `values.tex`. Nothing it
-writes shows up in this repo's `git status`.
+`tables.tex`, and `save_document_value()` (`save_value`) its `values.tex`; each records
+the name in `<document>/figures_manifest.json`. Nothing it writes shows up in this repo's
+`git status`.
 
-- **Confirm `DOC_REPO` points at the document you think it does before running anything
-  that saves.** Resolution (`src/doc_analysis/env.py`): a real environment variable wins,
-  otherwise `$DOC_ENV`, otherwise the nearest `.env` above the cwd, otherwise — only via
-  `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the active
+- **Confirm the target documents are the ones you think before running anything that
+  saves:** print `target_documents()`, not just `DOC_REPO`. They come from the structure,
+  strictest first (ADR 0003): a `layout.toml` here declaring `analysis-hosts-writing`
+  (`src/doc_analysis/layout.py`) puts the one document at `<root>/<nested_dir>`; else a
+  `layout.toml` in this checkout's parent declaring `writing-hosts-analysis` with
+  `nested_dir` equal to this checkout's directory name makes *that parent* the document —
+  so a checkout nested in a document writes into it with no `.env` at all; else this
+  checkout's `kind: "analysis"` member in the nearest `.claude/workspace.json`
+  (`src/doc_analysis/workspace.py`, matched by `dir`) lists them in `documents`, resolved
+  against the workspace root — any number, so **one save can write into several
+  documents**. Only when no structure names a document is `DOC_REPO` the source. When one
+  does, a `DOC_REPO` naming one of the targets is accepted silently and anything else
+  **raises**, quoting both — it no longer wins with a warning.
+- **`DOC_REPO` itself** resolves (`src/doc_analysis/env.py`): a real environment variable
+  wins, otherwise `$DOC_ENV`, otherwise the nearest `.env` above the cwd, otherwise — only
+  via `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the active
   checkout: the analysis checkout the cwd is in, else the one the package is installed
-  from. So a notebook on the wrong interpreter, started outside its repo, can read
-  *another* checkout's `.env`; check `document_repo()`, not just that it is set. The
-  config, `figures_html/` and the parity baseline follow the active checkout too. A `.env` never
-  overrides an explicit export. Then a `layout.toml` declaring
-  `analysis-hosts-writing` (`src/doc_analysis/layout.py`) puts it at
-  `<root>/<nested_dir>`. Last of all, if this checkout's parent has a `layout.toml`
-  declaring `writing-hosts-analysis` with `nested_dir` equal to this checkout's directory
-  name, `DOC_REPO` *is that parent* — so a checkout nested in a document writes into it
-  with no `.env` at all. A `DOC_REPO` that disagrees with either layout still wins, with a
-  warning.
-- **`document_repo()` returning `None` is no-document mode, not a bug to fix.** It is
-  entered only when *nothing* names a document — no `DOC_REPO`, no layout on either side
-  — and the savers then write to this checkout's gitignored `outputs/` (figures in
-  `outputs/figures/`, `tables.tex`/`values.tex` in `outputs/<section>/`), touch no `.tex`,
-  and print one line saying so. Anything that names a document and is wrong still raises;
-  keep it that way, because a misconfiguration that fell back to `outputs/` would look
-  like a successful save. It is also where a notebook on the wrong interpreter can end
-  up, so when a save reports no document, check that before assuming none was intended.
-  Never "fix" it by setting `DOC_REPO`: whether this analysis has a document is the
-  author's call, and pointing it at a guess writes into someone's document.
+  from. The layouts and the workspace are found from the same checkout. So a notebook on
+  the wrong interpreter, started outside its repo, can read *another* checkout's
+  structure. The config, `figures_html/` and the parity baseline follow the active
+  checkout too. A `.env` never overrides an explicit export.
+- **Several targets: `documents=` narrows, never adds.** `save_fig`, `save_table` and
+  `save_value` (and the `save_document_*` workers) write to every target by default;
+  `documents=["paper"]` picks a subset by the `workspace.json` entry (else the document's
+  directory name). A name that is not a target raises. Every chosen target is checked
+  before anything is written: one missing the section, or one where another analysis owns
+  the name, fails the whole save. Never create a section directory in a document to make
+  a save pass — the section is the author's.
+- **Names have owners.** The first analysis to write a figure filename (or label), table
+  tag or value macro into a document owns it there; the manifest entry's `analysis` says
+  who (a workspace analysis's member `dir`, else its directory name). A save from another
+  analysis raises `OwnershipError` naming the owner. Do not work around it by renaming or
+  prefixing — names are never changed — and do not edit the manifest's `analysis` by
+  hand: save under another name, or have the owner release it (delete the PNG or block,
+  then `check-figure-parity --prune`).
+- **`target_documents()` naming none is no-document mode, not a bug to fix**
+  (`document_repo()` returns `None`). It is entered only when *nothing* names a document
+  — no `DOC_REPO`, no layout on either side, no workspace member — or when the
+  workspace's `documents` is `[]`; the savers then write to this checkout's gitignored
+  `outputs/` (figures in `outputs/figures/`, `tables.tex`/`values.tex` in
+  `outputs/<section>/`), touch no `.tex`, and print one line saying so. Anything that
+  names a document and is wrong still raises; keep it that way, because a
+  misconfiguration that fell back to `outputs/` would look like a successful save. It is
+  also where a notebook on the wrong interpreter can end up, so when a save reports no
+  document, check that before assuming none was intended. Never "fix" it by setting
+  `DOC_REPO` or editing `documents`: whether this analysis has a document is the author's
+  call (`attach-analysis` / `detach-analysis`), and pointing it at a guess writes into
+  someone's document.
 - **Never set `DOC_REPO` in a shell profile.** The moment there is a second document it
   points at the wrong one, and the failure is silent — figures land in another document.
 - For tests and exploratory runs, don't point `DOC_REPO` at a real document. `section=`
@@ -65,8 +90,11 @@ not prompt.
   `ambiguous`. Save under a new name instead of renaming.
 - **Never describe a figure you have not looked at.** A caption plus a confident
   description is a fabricated result with a real label attached. What exists is recorded in
-  `figures_html/figures_manifest.json` (or `$FIGURES_HTML_DIR`), keyed `"Fig: <label>"`,
-  with the `backend` and `interactive: null` for a static-only figure.
+  each target document's `figures_manifest.json` (with no document, in
+  `figures_html/` or `$FIGURES_HTML_DIR`), keyed `"Fig: <label>"`, with the `backend`,
+  the owning `analysis`, and `interactive: null` for a static-only figure. A document's
+  manifest is shared by every analysis feeding it, and also holds `"Tab: <tag>"` and
+  `"Val: <macro>"` entries.
 - **The appended `.tex` block is commented out on purpose.** It waits for the author to
   place the figure in the prose. So `check-figure-parity --figures` listing a figure as not
   rendered is the normal state, not a bug to fix: do not uncomment blocks, and do not
