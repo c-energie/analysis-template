@@ -1,15 +1,20 @@
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
+from doc_analysis.manifest import TABLE_PREFIX, relative_to_manifest, update_manifest
 from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _check_owners,
+    _document_relative,
     _local_section_dir,
     _one_of,
-    _resolve_save_target,
+    _plan_save,
+    _single_or_list,
     search_root,
 )
 
@@ -139,10 +144,35 @@ def _write_tagged_block(library_path, tag, block, kind):
     return library_path
 
 
+def _record_library_entry(target, analysis, key, library_path, tag, notebook, **extra):
+    """Record a table's or value's owner in its document's manifest.
+
+    The block itself lives in the section's library file; the entry is what makes the
+    name owned — the first analysis to write it into a document — and lets
+    `check-figure-parity --prune` release it once the block is gone.
+    """
+    manifest_path = target.manifest_path
+    update_manifest(manifest_path, key, {
+        "analysis": analysis,
+        "notebook": notebook,
+        "library": relative_to_manifest(manifest_path, library_path),
+        "tag": tag,
+        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **extra,
+    })
+
+
+def _release_block(library_name, tag):
+    """The 'how to release it' half of an ownership error, for a tagged block."""
+    return lambda target: (f"delete the %<*{tag}> ... %</{tag}> block from "
+                           f"{_document_relative(target, target.section_dir / library_name)}")
+
+
 def save_document_table(df, name, caption=None, label=None, sections_root=None,
                       library_name=LIBRARY_NAME, add_reference=True, index=False,
                       decimals=2, escape=False, column_format=None, *, section=None,
-                      tex=None, chapter=None, chapters_root=None, **to_latex_kwargs):
+                      tex=None, chapter=None, chapters_root=None, documents=None,
+                      notebook=None, **to_latex_kwargs):
     """Save a DataFrame as a LaTeX table into a per-leaf shared table library file.
 
     The section directory is chosen interactively unless section is given (a path
@@ -166,7 +196,13 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
     tex=False suppresses the snippet, and several candidate .tex files raise rather than
     prompt. caption defaults to a TODO placeholder and label to name (giving
     \\label{Tab: <name>}). index, decimals, escape, column_format and any extra keyword
-    arguments are forwarded to dataframe_to_latex. Returns the library file Path.
+    arguments are forwarded to dataframe_to_latex. Returns the library file Path, or a
+    list of them when it wrote to several documents.
+
+    A relative section is written into every target document, as for
+    save_document_figure, and documents= narrows that the same way. Each document's
+    manifest records the table as "Tab: <tag>" with its owner and notebook; a tag another
+    analysis owns in any chosen document raises before anything is written.
 
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
@@ -176,24 +212,38 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
     """
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_save_target(section, sections_root)
-    # No document: the library goes to outputs/<section>/ and there is no prose to hold
-    # a reference, so none is appended.
-    in_document = section_dir is not None
-    if not in_document:
-        section_dir = _local_section_dir(section)
-    library_path = section_dir / library_name
+    plan = _plan_save(section, sections_root, documents)
 
     tag = Path(name).stem
     caption = caption if caption is not None else "TODO: caption"
     label = label if label is not None else tag
+    key = f"{TABLE_PREFIX}{tag}"
+    if plan is not None:
+        _check_owners(plan, f"The table {tag!r}", _release_block(library_name, tag),
+                      keys=(key,))
 
     tabular = dataframe_to_latex(df, index=index, decimals=decimals, escape=escape,
                                  column_format=column_format, **to_latex_kwargs)
     block = _build_table_block(tabular, caption, label)
-    _write_table_to_library(library_path, tag, block)
 
-    if add_reference and in_document:
+    # No document: the library goes to outputs/<section>/ and there is no prose to hold
+    # a reference, so none is appended.
+    if plan is None:
+        library_path = _local_section_dir(section) / library_name
+        _write_table_to_library(library_path, tag, block)
+        return library_path
+
+    written = []
+    for target in plan.targets:
+        section_dir = target.section_dir
+        library_path = section_dir / library_name
+        _write_table_to_library(library_path, tag, block)
+        written.append(library_path)
+        if target.document is not None:
+            _record_library_entry(target, plan.analysis, key, library_path, tag, notebook)
+
+        if not add_reference:
+            continue
         already = find_table_reference(section_dir, tag, exclude={library_name})
         if already is not None:
             print(f"Table '{tag}' is already pulled in by {already.name}; "
@@ -204,4 +254,4 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
             _append_commented_block(section_dir, reference, exclude={library_name},
                                     tex_name=None if tex is True else tex)
 
-    return library_path
+    return _single_or_list(written)

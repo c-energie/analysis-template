@@ -16,19 +16,24 @@ unfinished migration: you give up the interactive export and nothing else. Downs
 handles it — the publishing engine's figure emitter falls through to the static PNG
 whenever an entry has no interactive export.
 
-Either way the figure is recorded in that directory's figures_manifest.json, with a
-`backend` field and `interactive: null` for the static-only case. The manifest is the
+Either way the figure is recorded in a figures_manifest.json — the target document's own,
+at its root, shared by every analysis feeding it (see manifest.py); with no document, the
+html directory's — with a `backend` field and `interactive: null` for the static-only
+case. The manifest is the
 record of everything this pipeline writes, which is what `check-figure-parity` reads to
 guard figure sizes and to report which figures the document actually renders — so a
 matplotlib figure is covered by both checks exactly as a plotly one is.
 
-The LaTeX repo is an input, located via the DOC_REPO environment variable (the
-same convention the publishing agent uses), else — in the nested layout — via the
-committed layout.toml: this repo's or, when this repo is the nested one, its host's.
-This package never hardcodes a user path. When none of those names a document — an
-analysis repo standing alone, before there is a write-up — that is no-document mode: the
-PNG goes to the checkout's own `outputs/figures/` and nothing touches a .tex file, so the
-same notebook lands its figures in the document once one is configured.
+The LaTeX repos are inputs: the **target documents** (`target_documents`), named by the
+structure — this repo's committed layout.toml, its host's, or the workspace's
+`.claude/workspace.json`, which can attach one analysis to several documents — else by
+the DOC_REPO environment variable (the same convention the publishing agent uses), which
+may agree with the structure but never contradict it (ADR 0003). A save writes into every
+target unless `documents=` narrows it. This package never hardcodes a user path. When
+none of those names a document — an analysis repo standing alone, before there is a
+write-up — that is no-document mode: the PNG goes to the checkout's own
+`outputs/figures/` and nothing touches a .tex file, so the same notebook lands its
+figures in the document once one is configured.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
@@ -36,15 +41,25 @@ The HTML directory is nonetheless gitignored until the publishing route is built
 see .gitignore.
 """
 
-import json
 import os
 import re
+import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from doc_analysis.env import LAST_SEARCH, analysis_root, describe_search
 from doc_analysis.layout import find_host_layout, find_layout
+from doc_analysis.manifest import (
+    FIGURE_PREFIX,
+    MANIFEST_NAME,
+    migrate_entries,
+    refuse_clash,
+    relative_to_manifest,
+    update_manifest,
+)
+from doc_analysis.workspace import find_workspace_analysis
 
 DOC_REPO_ENV = "DOC_REPO"
 HTML_DIR_ENV = "FIGURES_HTML_DIR"
@@ -54,7 +69,6 @@ SECTIONS_DIRNAME = "Sections"
 #: What the document's section tree was called before the rename. Still accepted, so a
 #: document repo laid out before it keeps working; Sections/ wins where both exist.
 LEGACY_SECTIONS_DIRNAME = "Chapters"
-MANIFEST_NAME = "figures_manifest.json"
 
 HTML_DIRNAME = "figures_html"
 
@@ -86,23 +100,51 @@ ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
 GENERATED_TEX_NAMES = ("tables.tex", "values.tex")
 
 
-def document_repo():
-    """Root of the LaTeX document repo, from $DOC_REPO, else from a `layout.toml`.
+class TargetDocument(NamedTuple):
+    """One document repo a save writes into."""
+    #: How `documents=` names it: the `workspace.json` entry as written, else the
+    #: document's directory name.
+    name: str
+    path: Path
+    #: What named it, for messages: a `layout.toml`, the `workspace.json`, or $DOC_REPO.
+    source: str
 
-    $DOC_REPO — a real environment variable, else `.env`'s — wins. Without it, a
-    `layout.toml` declaring `analysis-hosts-writing` puts the document at
-    `<root>/<nested_dir>` (see layout.py). Last of all, when this repo is itself the
-    nested repo — its parent's `layout.toml` declares `writing-hosts-analysis` and names
-    this repo's directory — the document is that parent. A $DOC_REPO that disagrees with
-    either layout still wins but warns: it is almost always a `.env` left over from
-    before the nesting.
 
-    Returns None when none of those sources names a document at all: no-document mode,
-    for an analysis repo that stands alone (see `local_output_dir`). Anything that names
-    one and is wrong — a `DOC_REPO` without Sections/, a nested dir not cloned yet, a host
-    layout naming another directory — raises with an actionable message rather than
-    guessing: writing a figure into the wrong tree would silently break the document
-    build, and falling back to local output would hide the mistake just as well.
+class Targets(NamedTuple):
+    """Every target document of this analysis, and the name it owns entries under."""
+    documents: tuple
+    #: The owner recorded in each document's manifest: a workspace analysis's member
+    #: `dir`, else (a nested analysis, or one found through $DOC_REPO) its directory name.
+    analysis: str
+
+    @property
+    def names(self):
+        return [document.name for document in self.documents]
+
+
+def target_documents():
+    """This analysis's target documents, in order, and its owner name (ADR 0003).
+
+    The structure names them, strictest first: this repo's own `layout.toml`
+    (`analysis-hosts-writing`, ADR 0001); the host repo's, naming this directory
+    (`writing-hosts-analysis`, ADR 0002); then this repo's analysis member in the nearest
+    `.claude/workspace.json` and its `documents` list, each entry resolved against the
+    workspace root. A nested analysis resolves from its layout alone, so not being listed
+    in `workspace.json` is normal.
+
+    $DOC_REPO — a real environment variable, else `.env`'s — is checked against the
+    structure, never preferred to it: naming one of the targets is accepted silently, and
+    anything else raises, quoting both. It used to win with a warning, which is how a
+    `.env` left from before the nesting sent figures into the wrong document unnoticed.
+    Only where no structure names a document is it the source, as it always was.
+
+    An empty list of documents is no-document mode (see `local_output_dir`): nothing
+    names a document, or the workspace attaches this analysis to none. Anything that names
+    one and is wrong — a $DOC_REPO without Sections/, a nested dir not cloned yet, a host
+    layout naming another directory, a `workspace.json` entry that is not a document —
+    raises with an actionable message rather than guessing: writing a figure into the
+    wrong tree silently breaks the document build, and falling back to local output would
+    hide the mistake just as well.
     """
     value = os.environ.get(DOC_REPO_ENV)
     fallback = LAST_SEARCH["fallback"]
@@ -110,59 +152,123 @@ def document_repo():
     # Only looked for when this repo hosts nothing: its own layout.toml is nearer, and
     # the stricter-first precedence of ADR 0001 extends past it rather than around it.
     host = find_host_layout(fallback=fallback) if hosted is None else None
+    member = None
     if hosted is not None:
-        layout_file, layout_repo = hosted.file, hosted.nested_path
-    elif host is not None and host.matches:
-        layout_file, layout_repo = host.layout.file, host.layout.root
-    else:
-        layout_file = layout_repo = None
-
-    if value:
-        repo = Path(value)
-        if layout_repo is not None and repo.resolve() != layout_repo.resolve():
-            warnings.warn(f"{DOC_REPO_ENV}={repo} overrides {layout_file}, which puts the "
-                          f"document repo at {layout_repo}.", stacklevel=2)
-    elif layout_repo is not None:
-        repo = layout_repo
-        if hosted is not None and not repo.is_dir():
+        if not hosted.nested_path.is_dir():
             # The normal state of a fresh clone: the nested repo is gitignored, so it
-            # does not come with the host and has to be cloned in once.
+            # does not come with the host and has to be cloned in once. Raised whatever
+            # $DOC_REPO says: it cannot be the document while its directory is absent.
             raise RuntimeError(
-                f"{DOC_REPO_ENV} is not set, and {hosted.file} puts the document repo at "
-                f"{repo}, which does not exist. Clone it into place with\n"
+                f"{hosted.file} puts the document repo at {hosted.nested_path}, which "
+                f"does not exist. Clone it into place with\n"
                 f"    python setup_nested.py\n"
                 f"run in {hosted.root}."
             )
-    elif host is None:
+        structure = [TargetDocument(hosted.nested_dir, hosted.nested_path, str(hosted.file))]
+        analysis = hosted.root.name
+    elif host is not None and host.matches:
+        structure = [TargetDocument(host.layout.root.name, host.layout.root,
+                                    str(host.layout.file))]
+        analysis = host.root.name
+    else:
+        member = find_workspace_analysis(fallback=fallback)
+        structure = (None if member is None else
+                     [TargetDocument(entry, path, str(member.file))
+                      for entry, path in member.documents])
+        analysis = member.member_dir if member is not None else analysis_root().name
+
+    if structure is not None:
+        for document in structure:
+            if section_root_name(document.path) is None:
+                raise NotADirectoryError(
+                    f"{document.path} (from {document.source}) does not look like the "
+                    f"document repo (no {SECTIONS_DIRNAME}/ directory).")
+        if value:
+            _refuse_disagreeing_doc_repo(value, structure, member)
+        return Targets(tuple(structure), analysis)
+
+    if value:
+        repo = Path(value)
+        if section_root_name(repo) is None:
+            raise NotADirectoryError(
+                f"{DOC_REPO_ENV}={repo} does not look like the document repo "
+                f"(no {SECTIONS_DIRNAME}/ directory)."
+            )
+        return Targets((TargetDocument(repo.resolve().name, repo, f"${DOC_REPO_ENV}"),),
+                       analysis)
+    if host is None:
         # Nothing names a document: no-document mode, and the savers write to
         # local_output_dir() instead. Never a guess at a document — only the absence of
         # every source gets here; each misconfiguration above and below still raises.
-        return None
-    else:
-        # Saying where it looked is what tells a notebook started from the wrong
-        # directory apart from a .env that is genuinely missing the line.
-        looked = "".join(f"\n  - {line}" for line in describe_search())
-        # A renamed nested checkout: the host's layout.toml names another directory, so
-        # the parent is not known to be this repo's document. Both names, because the
-        # fix is renaming one of them to the other. Not no-document mode: the host says a
-        # document is meant to be here, and saving locally would hide the rename.
-        looked += (f"\n  - {host.layout.file} declares {host.layout.layout}, but its "
-                   f"nested_dir = {host.layout.nested_dir!r} is not this repo's "
-                   f"directory, {host.root.name!r}; rename one to match the other")
+        return Targets((), analysis)
+
+    # Saying where it looked is what tells a notebook started from the wrong directory
+    # apart from a .env that is genuinely missing the line.
+    looked = "".join(f"\n  - {line}" for line in describe_search())
+    # A renamed nested checkout: the host's layout.toml names another directory, so the
+    # parent is not known to be this repo's document. Both names, because the fix is
+    # renaming one of them to the other. Not no-document mode: the host says a document
+    # is meant to be here, and saving locally would hide the rename.
+    looked += (f"\n  - {host.layout.file} declares {host.layout.layout}, but its "
+               f"nested_dir = {host.layout.nested_dir!r} is not this repo's "
+               f"directory, {host.root.name!r}; rename one to match the other")
+    raise RuntimeError(
+        f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
+        f"    {DOC_REPO_ENV}=/path/to/my-document\n"
+        f"pointing at the LaTeX document repo root — the directory containing "
+        f"{SECTIONS_DIRNAME}/."
+        + (f"\nWhere it looked:{looked}" if looked else "")
+    )
+
+
+def _refuse_disagreeing_doc_repo(value, structure, member):
+    """Raise unless $DOC_REPO names one of the documents the structure names.
+
+    A $DOC_REPO naming a target is the common, harmless case — setup-doc-publish writes
+    one into `.env` because doc-publish reads nothing else — so it is silent. Anything
+    else is almost always a `.env` from before the nesting or the workspace, and a
+    warning in a notebook's output is easy to miss while the figures land elsewhere.
+    """
+    repo = Path(value).resolve()
+    if any(repo == document.path.resolve() for document in structure):
+        return
+    if not structure:
+        # The workspace attaches this analysis to nothing, deliberately: a $DOC_REPO
+        # still naming a document is what detach-analysis leaves behind in .env, and
+        # honouring it would keep feeding the document that was just detached.
         raise RuntimeError(
-            f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
-            f"    {DOC_REPO_ENV}=/path/to/my-document\n"
-            f"pointing at the LaTeX document repo root — the directory containing "
-            f"{SECTIONS_DIRNAME}/."
-            + (f"\nWhere it looked:{looked}" if looked else "")
-        )
-    if section_root_name(repo) is None:
-        source = f"{DOC_REPO_ENV}={repo}" if value else f"{repo} (from {layout_file})"
-        raise NotADirectoryError(
-            f"{source} does not look like the document repo "
-            f"(no {SECTIONS_DIRNAME}/ directory)."
-        )
-    return repo
+            f"{DOC_REPO_ENV}={value} names a document, but {member.file} attaches this "
+            f"analysis ({member.member_dir!r}) to none (documents = []). Remove "
+            f"{DOC_REPO_ENV} from this repo's .env, or attach the document "
+            f"(attach-analysis).")
+    named = ", ".join(str(document.path) for document in structure)
+    raise RuntimeError(
+        f"{DOC_REPO_ENV}={value} disagrees with {structure[0].source}, which puts this "
+        f"analysis's target document{'s' if len(structure) > 1 else ''} at {named}. "
+        f"Remove {DOC_REPO_ENV} from this repo's .env (the structure locates the "
+        f"document without it), or point it at {'one of those' if len(structure) > 1 else 'that'}.")
+
+
+def document_repos():
+    """The target documents' roots, in order; [] in no-document mode."""
+    return [document.path for document in target_documents().documents]
+
+
+def document_repo():
+    """Root of the one target document, or None in no-document mode.
+
+    The single-document view of `target_documents`, for callers that can only act on
+    one: the picker, `sections_dir()`, `notebook-skeleton`'s section check. A workspace
+    analysis attached to several documents raises, naming them, rather than picking one —
+    which of them a caller meant is not something to guess.
+    """
+    targets = target_documents()
+    if len(targets.documents) > 1:
+        raise RuntimeError(
+            f"This analysis has {len(targets.documents)} target documents "
+            f"({', '.join(targets.names)}), and document_repo() returns one. Pass an "
+            f"explicit section path, or use target_documents() / document_repos().")
+    return targets.documents[0].path if targets.documents else None
 
 
 def section_root_name(repo):
@@ -197,7 +303,8 @@ def _sections_of(repo):
 
 #: How to leave no-document mode, for every message that mentions it.
 _HOW_TO_CONFIGURE = (f"To save into a document, set {DOC_REPO_ENV} in this repo's .env "
-                     f"(copy .env.example), or nest this repo in a document.")
+                     f"(copy .env.example), nest this repo in a document, or attach it "
+                     f"to one in the workspace (attach-analysis).")
 
 #: Where a save goes in no-document mode, under the active checkout.
 OUTPUTS_DIRNAME = "outputs"
@@ -243,22 +350,112 @@ def _local_section_dir(section):
     return section_dir
 
 
-def _resolve_save_target(section, sections_root=None):
-    """The document's section directory for a save, or None in no-document mode.
+class SaveTarget(NamedTuple):
+    """Where one save writes: a section directory, and the document it belongs to.
 
-    No-document mode applies only where the document would have been consulted — a
-    relative section with no sections_root. An absolute section or an explicit root is
-    used exactly as before, document or not; and section=None still reaches the picker,
-    which raises without a document rather than prompting over nothing. On None the
-    caller writes under `local_output_dir()`; the notice has already been printed.
+    `document` is None for an explicit section — an absolute `section=`, a
+    `sections_root=`, the picker — which never consulted the target documents; its
+    manifest stays in the html directory, as it always was, and has no owner to check.
     """
-    if section is not None and sections_root is None and not Path(section).is_absolute():
-        repo = document_repo()
-        if repo is None:
-            _announce_no_document()
-            return None
-        sections_root = _sections_of(repo)
-    return _resolve_section_dir(section, sections_root)
+    section_dir: Path
+    document: "TargetDocument | None"
+
+    @property
+    def manifest_path(self):
+        return None if self.document is None else self.document.path / MANIFEST_NAME
+
+
+class SavePlan(NamedTuple):
+    """Every target of one saver call, checked before anything is written."""
+    targets: tuple
+    #: The owner name written into each document's manifest; None for explicit sections.
+    analysis: "str | None"
+
+
+def _choose(targets, documents):
+    """The subset of `targets.documents` that `documents=` names, in the targets' order.
+
+    `documents=` can only narrow: a name that is not a target raises rather than adding a
+    document, because the list of targets is the workspace's to say, not a notebook's.
+    """
+    if documents is None:
+        return list(targets.documents)
+    wanted = [documents] if isinstance(documents, (str, os.PathLike)) else list(documents)
+    if not wanted:
+        raise ValueError("documents=[] chooses no target document, so nothing would be "
+                         "saved; leave documents= out to write to every target.")
+    chosen = set()
+    for want in wanted:
+        match = next((document for document in targets.documents
+                      if want == document.name
+                      or Path(want).resolve() == document.path.resolve()), None)
+        if match is None:
+            listed = ", ".join(targets.names) or "none: no document is configured"
+            raise ValueError(f"documents= names {str(want)!r}, which is not a target "
+                             f"document of this analysis (targets: {listed}). "
+                             f"documents= can only narrow the targets, never add one.")
+        chosen.add(match)
+    return [document for document in targets.documents if document in chosen]
+
+
+def _plan_save(section, sections_root=None, documents=None):
+    """Every section directory a save writes into, or None in no-document mode.
+
+    The target documents apply only where the document would have been consulted — a
+    relative section with no sections_root. Each chosen target must already hold the
+    section, checked for all of them before the caller writes anything: a save that
+    landed in one document and raised for the next would leave the two disagreeing, and
+    a section directory created here would be a guess at the document's structure.
+
+    An absolute section or an explicit root is used exactly as before, document or not;
+    and section=None still reaches the picker, which raises without a document rather
+    than prompting over nothing. On None the caller writes under `local_output_dir()`;
+    the notice has already been printed.
+    """
+    if section is None or sections_root is not None or Path(section).is_absolute():
+        if documents is not None:
+            raise TypeError("documents= chooses among the target documents, so it needs "
+                            "a section relative to their Sections/; this section= or "
+                            "sections_root= already names one directory.")
+        return SavePlan((SaveTarget(_resolve_section_dir(section, sections_root), None),),
+                        None)
+
+    targets = target_documents()
+    if not targets.documents:
+        if documents is not None:
+            _choose(targets, documents)  # raises: there is nothing to choose from
+        _announce_no_document()
+        return None
+    chosen = _choose(targets, documents)
+    planned = [SaveTarget(_sections_of(document.path) / section, document)
+               for document in chosen]
+    missing = [target for target in planned if not target.section_dir.is_dir()]
+    if missing:
+        where = "; ".join(f"{target.section_dir} (in {target.document.name})"
+                          for target in missing)
+        raise NotADirectoryError(
+            f"Section directory not found: {where}. Nothing was saved to any target "
+            f"document. Create the section in "
+            f"{'each document' if len(missing) > 1 else 'the document'} first, or narrow "
+            f"the save with documents=[...].")
+    return SavePlan(tuple(planned), targets.analysis)
+
+
+def _check_owners(plan, what, release, keys=(), stem=None):
+    """Refuse the save when another analysis owns the name in any chosen document.
+
+    All targets first, then the caller writes: a clash in the second document must not
+    leave the first one already holding the new version.
+    """
+    for target in plan.targets:
+        if target.document is not None:
+            refuse_clash(target.manifest_path, plan.analysis, what,
+                         release(target), keys=keys, stem=stem)
+
+
+def _single_or_list(paths):
+    """A saver's return value: the one path as before, a list when it wrote to several."""
+    return paths[0] if len(paths) == 1 else paths
 
 
 def chapters_dir():
@@ -663,26 +860,33 @@ def _detect_notebook():
 def _update_manifest(html_dir, key, entry):
     """Create/refresh one entry in <html_dir>/figures_manifest.json.
 
-    Keyed by LaTeX label ("Fig: <label>") to match the publishing agent's figures.json, whose
-    FigureEmitter reads `interactive` as a path relative to this manifest file — and
-    falls through to the static PNG when it is null, which is how a matplotlib figure
-    publishes. The manifest is rewritten on every save rather than maintained by hand.
+    The manifest of a save that has no target document — no-document mode, an explicit
+    section. Keyed by LaTeX label ("Fig: <label>") to match the publishing agent's
+    figures.json, whose FigureEmitter reads `interactive` as a path relative to this
+    manifest file — and falls through to the static PNG when it is null, which is how a
+    matplotlib figure publishes.
     """
-    manifest_path = Path(html_dir) / MANIFEST_NAME
-    manifest = {}
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest[key] = entry
-    manifest_path.write_text(
-        json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    return manifest_path
+    return update_manifest(Path(html_dir) / MANIFEST_NAME, key, entry)
+
+
+def _migrate_old_manifest(plan, html_dir):
+    """Move this analysis's pre-ADR-0003 entries into each chosen document's manifest.
+
+    Before, every entry lived in `figures_html/figures_manifest.json`; now a document's
+    lives in the document. Run on every save into a document, and a no-op once the old
+    file has nothing left for it, so the first save after upgrading moves them and later
+    ones neither repeat nor duplicate it.
+    """
+    for target in plan.targets:
+        if target.document is not None:
+            migrate_entries(Path(html_dir) / MANIFEST_NAME, target.manifest_path,
+                            target.document.path, plan.analysis)
 
 
 def save_document_figure(name, fig=None, caption=None, label=None, *, section=None,
                        tex=None, hover_fields=None, static_scale=2, html_dir=None,
                        sections_root=None, notebook=None, chapter=None,
-                       chapters_root=None, **save_kwargs):
+                       chapters_root=None, documents=None, **save_kwargs):
     """Save a document figure: PNG into the LaTeX tree, plus interactive HTML if plotly.
 
     name is the figure file name; if it has no extension, ".png" is assumed. fig may be
@@ -695,49 +899,72 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
     section directory; tex names that file explicitly (no prompt) and tex=False skips
     the append.
 
+    A relative section is written into **every** target document (`target_documents`)
+    — one, for a nested analysis or $DOC_REPO; any number, for a workspace analysis.
+    documents=["<name>", ...] narrows that to a subset; a name that is not a target
+    raises. Every chosen target is checked before anything is written: one lacking the
+    section, or one whose manifest records another analysis as the owner of this
+    filename or label, raises and none of them is written.
+
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
 
-    With no document configured (`document_repo()` is None) a relative section names
-    no directory, so the PNG goes to `outputs/figures/<name>` in the active checkout
-    instead and no .tex block is appended; the html directory and the manifest are
-    written as usual, the manifest's `static` naming the local PNG.
+    With no document configured (no target documents) a relative section names no
+    directory, so the PNG goes to `outputs/figures/<name>` in the active checkout
+    instead and no .tex block is appended; the manifest is the html directory's, its
+    `static` naming the local PNG.
 
     Plotly figures additionally write <stem>.html into the local html directory
     (html_dir argument, else $FIGURES_HTML_DIR, else the repo's figures_html/)
     with include_plotlyjs="directory", so one shared plotly.min.js sits alongside and
-    the exports work offline — the publishing agent's site builder copies both.
+    the exports work offline — the publishing agent's site builder copies both. The
+    HTML stays in this repo, whichever documents the PNG goes to.
 
-    Every figure, either backend, gets a manifest entry in that directory keyed by
-    "Fig: <label>" and carrying {interactive, static, stem, backend, generated,
-    notebook, hover_fields}. interactive is null for a matplotlib figure; hover_fields
-    documents the identifying fields a plotly figure's hovertemplates expose.
-    static_scale is the kaleido export scale (plotly only). Extra keyword arguments are
-    forwarded to write_image (plotly) or savefig (matplotlib).
+    Every figure, either backend, gets a manifest entry keyed by "Fig: <label>" and
+    carrying {interactive, static, stem, backend, generated, notebook, hover_fields},
+    plus `analysis`, its owner, in a document. A document's entry is in the document's
+    own figures_manifest.json, its paths relative to that file; anything else's is in the
+    html directory's, as before. interactive is null for a matplotlib figure;
+    hover_fields documents the identifying fields a plotly figure's hovertemplates
+    expose. static_scale is the kaleido export scale (plotly only). Extra keyword
+    arguments are forwarded to write_image (plotly) or savefig (matplotlib).
 
-    Returns the saved PNG Path.
+    Returns the saved PNG Path — a list of them, one per document, when it wrote to
+    several.
     """
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_save_target(section, sections_root)
+    plan = _plan_save(section, sections_root, documents)
+
+    file_name = Path(name).name if Path(name).suffix else f"{Path(name).name}.png"
+    stem = Path(file_name).stem
+    key = f"{FIGURE_PREFIX}{label or stem}"
+    resolved_html_dir = _resolve_html_dir(html_dir)
+
+    if plan is not None:
+        _migrate_old_manifest(plan, resolved_html_dir)
+        _check_owners(
+            plan, f"The figure {file_name!r}",
+            lambda target: (f"delete "
+                            f"{_document_relative(target, target.section_dir / FIGURES_DIRNAME / file_name)}"
+                            f" (and its \\begin{{figure}} block) from the document"),
+            keys=(key,), stem=stem)
 
     # No document: one flat outputs/figures/, not one per section, because the bare
     # filename is the key everywhere downstream and a section tree would only invite two
     # figures of one name. The name itself is never changed.
-    figures_dir = (section_dir / FIGURES_DIRNAME if section_dir is not None
-                   else local_output_dir() / LOCAL_FIGURES_DIRNAME)
-    figures_dir.mkdir(parents=True, exist_ok=True)
-
-    save_path = figures_dir / name
-    if not save_path.suffix:
-        save_path = save_path.with_suffix(".png")
-    stem = save_path.stem
+    save_paths = ([target.section_dir / FIGURES_DIRNAME / name for target in plan.targets]
+                  if plan is not None
+                  else [local_output_dir() / LOCAL_FIGURES_DIRNAME / name])
+    save_paths = [path if path.suffix else path.with_suffix(".png") for path in save_paths]
+    for path in save_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    save_path = save_paths[0]
 
     if fig is None:
         fig = _matplotlib_figure()
 
-    resolved_html_dir = _resolve_html_dir(html_dir)
-
+    html_path = None
     if _is_plotly_figure(fig):
         backend = "plotly"
         save_kwargs.setdefault("scale", static_scale)
@@ -754,36 +981,55 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
             config={"displaylogo": False},
         )
         print(f"Saved interactive figure to: {html_path}")
-        interactive = html_path.name
 
         _default_hover_warning(fig, stem)
     else:
         # Not a warning: choosing matplotlib is a choice, and a warning on every save
         # is how a project learns to ignore the channel the checks above rely on.
         # ASCII only - this prints to a Windows console under cp1252.
-        backend, interactive = "matplotlib", None
+        backend = "matplotlib"
         fig.savefig(save_path, **save_kwargs)
         print(f"Saved figure to: {save_path}")
         print("  static only (matplotlib) - no interactive export")
 
-    _update_manifest(
-        resolved_html_dir,
-        f"Fig: {label or stem}",
-        {
-            "interactive": interactive,
-            "static": str(save_path),
-            "stem": stem,
-            "backend": backend,
-            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "notebook": notebook or _detect_notebook(),
-            "hover_fields": list(hover_fields) if hover_fields else [],
-        },
-    )
+    # Rendered once and copied: the documents get byte-identical PNGs, and a plotly
+    # figure does not pay kaleido's browser start per document.
+    for path in save_paths[1:]:
+        shutil.copyfile(save_path, path)
+        print(f"Saved figure to: {path}")
+
+    entry = {
+        "interactive": html_path.name if html_path is not None else None,
+        "static": str(save_path),
+        "stem": stem,
+        "backend": backend,
+        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "notebook": notebook or _detect_notebook(),
+        "hover_fields": list(hover_fields) if hover_fields else [],
+    }
+    if plan is None or plan.targets[0].document is None:
+        _update_manifest(resolved_html_dir, key, entry)
+    else:
+        for target, path in zip(plan.targets, save_paths):
+            manifest_path = target.manifest_path
+            update_manifest(manifest_path, key, dict(
+                entry, analysis=plan.analysis,
+                static=relative_to_manifest(manifest_path, path),
+                interactive=(relative_to_manifest(manifest_path, html_path.resolve())
+                             if html_path is not None else None)))
 
     # No document, no .tex to hold the block. Re-run once a document is configured and
     # the block is appended then, gated as always on the figure not being referenced.
-    if section_dir is not None:
-        add_commented_figure_to_tex(save_path.name, section_dir, caption=caption,
-                                    label=label, tex=tex)
+    if plan is not None:
+        for target, path in zip(plan.targets, save_paths):
+            add_commented_figure_to_tex(path.name, target.section_dir, caption=caption,
+                                        label=label, tex=tex)
+    return _single_or_list(save_paths)
 
-    return save_path
+
+def _document_relative(target, path):
+    """`path` relative to its target document's root, for a message; else as given."""
+    try:
+        return Path(path).relative_to(target.document.path).as_posix()
+    except ValueError:
+        return str(path)

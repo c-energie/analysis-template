@@ -241,7 +241,14 @@ def test_once_a_document_is_configured_saves_land_in_it(standalone, tmp_path, ca
     png = save_fig(FakeMatplotlibFigure(), "ptg_scatter.png")
     assert png == section / "Figures" / "ptg_scatter.png"
     assert "ptg_scatter.png" in (section / "ptg.tex").read_text(encoding="utf-8")
-    assert manifest_of(standalone)["Fig: ptg_scatter"]["static"] == str(png)
+    # The document's entry is in the document's own manifest, relative to it (ADR 0003);
+    # the local entry stays behind in figures_html/, still naming outputs/.
+    document_manifest = json.loads((document / MANIFEST_NAME).read_text(encoding="utf-8"))
+    entry = document_manifest["Fig: ptg_scatter"]
+    assert entry["static"] == "Sections/Results/ptg/Figures/ptg_scatter.png"
+    assert entry["analysis"] == "my-analysis"
+    assert manifest_of(standalone)["Fig: ptg_scatter"]["static"].startswith(
+        str(standalone / "outputs"))
     assert sorted((standalone / "outputs").rglob("*")) == before
     assert "No document configured" not in capsys.readouterr().out
 
@@ -312,8 +319,9 @@ def test_a_document_baseline_checked_with_no_document_is_an_error(standalone, tm
     assert run_parity("--snapshot") == 0
     baseline = json.loads((standalone / "docs" / "figure_png_baseline.json")
                           .read_text(encoding="utf-8"))
-    # A document's baseline is written exactly as before no-document mode existed.
+    # A document's baseline is keyed by document, and carries no local marker.
     assert "target" not in baseline
+    assert set(baseline["documents"]["document"]) == {"ptg_scatter.png"}
 
     del os.environ["DOC_REPO"]
     capsys.readouterr()

@@ -60,25 +60,27 @@ def test_a_kernel_started_beside_the_host_finds_it_through_the_checkout_fallback
     assert document_repo() == host / "my-study-writing"
 
 
-def test_an_exported_doc_repo_that_disagrees_wins_and_warns_naming_both(host, tmp_path):
+def test_an_exported_doc_repo_that_disagrees_raises_naming_both(host, tmp_path):
+    """ADR 0003: a DOC_REPO naming anything but the layout's document stops the save.
+    It used to win with a warning, which a notebook's output scrolls past while the
+    figures land in the other document."""
     exported = tmp_path / "exported"
     (exported / "Sections").mkdir(parents=True)
     os.environ["DOC_REPO"] = str(exported)
-    with pytest.warns(UserWarning) as caught:
-        assert document_repo() == exported
-    message = str(caught[0].message)
+    with pytest.raises(RuntimeError) as raised:
+        document_repo()
+    message = str(raised.value)
     assert str(exported) in message and str(host / "my-study-writing") in message
-    assert "\n" not in message
 
 
-def test_a_stale_dotenv_doc_repo_wins_and_warns(host, tmp_path):
+def test_a_stale_dotenv_doc_repo_raises(host, tmp_path):
     """The usual mismatch: a .env written for the side-by-side layout, kept after nesting."""
     old = tmp_path / "old-document"
     (old / "Sections").mkdir(parents=True)
     (host / ".env").write_text(f'DOC_REPO="{old}"\n', encoding="utf-8")
     load_env(start=host)
-    with pytest.warns(UserWarning, match="layout.toml"):
-        assert document_repo() == old
+    with pytest.raises(RuntimeError, match="layout.toml"):
+        document_repo()
 
 
 @pytest.mark.parametrize("value", ["absolute", "relative"])
@@ -230,8 +232,9 @@ def test_a_renamed_nested_checkout_gets_no_fallback_and_the_error_names_both(hos
 
 
 @pytest.mark.parametrize("how", ["environment", "dotenv"])
-def test_env_and_dotenv_override_the_host_layout_and_warn_when_they_differ(
-        hosted, tmp_path, how):
+def test_env_and_dotenv_that_disagree_with_the_host_layout_raise(hosted, tmp_path, how):
+    """ADR 0003 replaces ADR 0002's warn-and-win: the host layout names the document, and
+    a DOC_REPO naming another one is a misconfiguration to stop on, quoting both."""
     other = tmp_path / "other-document"
     (other / "Sections").mkdir(parents=True)
     analysis = hosted / "my-thesis-analysis"
@@ -240,9 +243,9 @@ def test_env_and_dotenv_override_the_host_layout_and_warn_when_they_differ(
     else:
         (analysis / ".env").write_text(f'DOC_REPO="{other}"\n', encoding="utf-8")
         load_env(start=analysis)
-    with pytest.warns(UserWarning) as caught:
-        assert document_repo() == other
-    message = str(caught[0].message)
+    with pytest.raises(RuntimeError) as raised:
+        document_repo()
+    message = str(raised.value)
     assert str(other) in message and str(hosted / "layout.toml") in message
 
 

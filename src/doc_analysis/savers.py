@@ -5,6 +5,7 @@ That put the same eight lines in eight places and made the on/off decision a sou
 Here the pair is built once and bound to the notebook's section, so a cell still reads::
 
     save_fig(fig, "coverage_timeline.png", hover_fields=["dwelling", "stream"])
+    save_fig(fig, "coverage_detail.png", documents=["paper"])   # one target only
 
 and whether that writes anything is decided by figures_config.toml (see figure_config).
 
@@ -40,6 +41,11 @@ def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
 
     Neither helper forces tex=False any more: appending is gated on the section not
     already referencing the artefact, so a re-save cannot produce a duplicate block.
+
+    Each saver writes into every target document of this analysis — several, for a
+    workspace analysis attached to several — and takes documents=["<name>", ...] to
+    narrow one call to a subset of them (see save_document_figure). A call without it
+    behaves exactly as it always has.
 
     chapter= is the pre-rename spelling of section=; it still works and warns. The old
     `section=` argument — which meant the config table, not the document division — is
@@ -78,7 +84,8 @@ def notebook_savers(section=None, notebook=None, tex=None, config_section=None,
         if not is_enabled(config_section, name, TABLES, path=config_path):
             return None
         kwargs.setdefault("tex", tex)
-        return save_document_table(df, name, caption=caption, section=section, **kwargs)
+        return save_document_table(df, name, caption=caption, section=section,
+                                   notebook=notebook, **kwargs)
 
     def save_value(value, name, **kwargs):
         """Write a scalar into the section's values.tex as a macro, if the config allows it."""

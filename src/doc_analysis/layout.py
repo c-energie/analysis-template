@@ -8,8 +8,9 @@ which:
     nested_dir = "my-study-writing"
     nested_remote = "https://github.com/<owner>/my-study-writing.git"
 
-`document_repo()` falls back to `<root>/<nested_dir>` when neither the environment nor a
-`.env` sets `DOC_REPO`. The location is a fact about the project, not the machine, so it
+`target_documents()` puts the document at `<root>/<nested_dir>`; a `DOC_REPO` from the
+environment or a `.env` must then name that same directory, or the save raises
+(docs/adr/0003-target-documents-from-workspace.md). The location is a fact about the project, not the machine, so it
 is committed rather than written into `.env` per clone — and a relative `DOC_REPO` in
 `.env` is no substitute, because it would resolve against the notebook's working
 directory. See docs/adr/0001-doc-repo-from-layout.md.

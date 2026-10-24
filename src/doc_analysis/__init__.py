@@ -3,8 +3,9 @@
     from doc_analysis import save_document_figure, save_document_table, figure_size
     from doc_analysis import save_document_value
 
-The LaTeX document repo is located via `DOC_REPO`, read from the checkout's own `.env`;
-nothing here hardcodes a path, and nothing here depends on a private package.
+The LaTeX document repos are this analysis's target documents (`target_documents`): from
+a `layout.toml`, the workspace's `.claude/workspace.json`, or `DOC_REPO` read from the
+checkout's own `.env`; nothing here hardcodes a path, and nothing here depends on a private package.
 
 **Both plotting backends are optional extras.** Plotly is the preferred one — a plotly
 figure produces the committed PNG *and* an interactive HTML export from the same object
@@ -37,6 +38,8 @@ from doc_analysis.save_figure import (
     select_chapter_dir,
     select_section_dir,
     document_repo,
+    document_repos,
+    target_documents,
 )
 from doc_analysis.save_table import (
     dataframe_to_latex,
@@ -67,6 +70,8 @@ __all__ = [
     "sections_dir",
     "select_section_dir",
     "document_repo",
+    "document_repos",
+    "target_documents",
     "dataframe_to_latex",
     "find_table_reference",
     "save_document_table",
