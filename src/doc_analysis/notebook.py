@@ -49,8 +49,8 @@ def notebook_setup(package_dir=None):
     `package_dir` stands in for this package's installed location, for tests. When the
     cwd is in no checkout and `package_dir` is not inside one either (a non-editable
     install) the fallback is skipped, the working directory is left alone and the root
-    returned is the one holding the `.env` used, else the cwd; `document_repo()` then
-    explains what was searched.
+    returned is the one holding the `.env` used, else the cwd. With no document found
+    that is no-document mode, and the first save's notice says what was searched.
     """
     installed_from = Path(package_dir) if package_dir else Path(env.__file__).resolve().parent
     installed = env.checkout_root(installed_from)

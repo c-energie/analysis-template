@@ -29,15 +29,24 @@ import re
 import warnings
 from pathlib import Path
 
+from doc_analysis.manifest import VALUE_PREFIX, read_manifest
 from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _check_tex_targets,
+    _check_owners,
+    _local_section_dir,
     _one_of,
-    _resolve_section_dir,
+    _plan_save,
+    _single_or_list,
     search_root,
 )
-from doc_analysis.save_table import _write_tagged_block
+from doc_analysis.save_table import (
+    _record_library_entry,
+    _release_block,
+    _write_tagged_block,
+)
 
 LIBRARY_NAME = "values.tex"
 #: The root settings file writing-template keeps \graphicspath in, and the values lines.
@@ -218,11 +227,29 @@ def check_values_loaded(section_dir, library_name=LIBRARY_NAME):
     return line
 
 
+def _tag_keys(target, library_path, tag):
+    """The manifest keys of other values written under `tag` into this same values.tex.
+
+    Two names can give one macro (macro= aside), and one name can be given two macros
+    with macro=; the block's tag is what the library replaces, so a second analysis
+    reusing a tag with its own macro would overwrite the owner's block without its macro
+    key ever clashing.
+    """
+    if target.document is None:
+        return ()
+    manifest_path = target.manifest_path
+    library = library_path.resolve()
+    return tuple(key for key, entry in read_manifest(manifest_path).items()
+                 if key.startswith(VALUE_PREFIX) and entry.get("tag") == tag
+                 and entry.get("library")
+                 and (manifest_path.parent / entry["library"]).resolve() == library)
+
+
 def save_document_value(name, value, fmt=None, decimals=2, unit=None, scale=None,
                         signed=False, macro=None, *, section=None, tex=None,
                         sections_root=None, library_name=LIBRARY_NAME,
                         add_reference=True, notebook=None, chapter=None,
-                        chapters_root=None):
+                        chapters_root=None, documents=None):
     """Write *value* into the section's values.tex as the macro for *name*.
 
     The section is a path relative to $DOC_REPO/Sections or an absolute path, as for
@@ -234,31 +261,69 @@ def save_document_value(name, value, fmt=None, decimals=2, unit=None, scale=None
     yet, a commented \\<macro> is appended as a ready-to-place snippet, by the same
     mechanism and with the same tex= target (tex=False to skip) as a figure's block. The
     document's root settings are then checked for the line that loads values.tex, with a
-    warning if it is missing. Returns the library file Path.
+    warning if it is missing. Returns the library file Path, or a list of them when it
+    wrote to several documents.
+
+    A relative section is written into every target document, as for
+    save_document_figure, and documents= narrows that the same way. Each document's
+    manifest records the value as "Val: <macro>" with its owner and notebook. A macro
+    another analysis owns in any chosen document, or one another value of the same
+    library already defines, raises before anything is written.
 
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
+
+    With no document configured, a relative section's values.tex is written to
+    `outputs/<section>/` in the active checkout instead; nothing else is touched.
     """
     check_value_name(name)
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_section_dir(section, sections_root)
-    library_path = section_dir / library_name
-
     macro = _check_macro(macro) if macro is not None else macro_name(name)
     rendered = format_value(value, fmt=fmt, decimals=decimals, unit=unit, scale=scale,
                             signed=signed)
-    _refuse_macro_clash(library_path, name, macro)
-    _write_tagged_block(library_path, name, _build_value_block(macro, rendered, notebook),
-                        kind="value")
+    block = _build_value_block(macro, rendered, notebook)
 
+    plan = _plan_save(section, sections_root, documents)
+    # No document: values.tex goes to outputs/<section>/, with no reference to append and
+    # no preamble to check for the line that loads it.
+    if plan is None:
+        library_path = _local_section_dir(section) / library_name
+        _refuse_macro_clash(library_path, name, macro)
+        _write_tagged_block(library_path, name, block, kind="value")
+        return library_path
+
+    key = f"{VALUE_PREFIX}{macro}"
+    for target in plan.targets:
+        library_path = target.section_dir / library_name
+        _refuse_macro_clash(library_path, name, macro)
+        _check_owners(plan._replace(targets=(target,)), f"The value \\{macro} ({name!r})",
+                      _release_block(library_name, name),
+                      keys=(key, *_tag_keys(target, library_path, name)))
     if add_reference:
-        already = find_value_reference(section_dir, macro, exclude={library_name})
-        if already is not None:
-            print(f"\\{macro} is already used in {already.name}; no reference appended.")
-        elif tex is not False:
-            _append_commented_block(section_dir, f"\\{macro}", exclude={library_name},
-                                    tex_name=None if tex in (None, True) else tex)
+        _check_tex_targets(
+            plan, tex,
+            lambda section_dir: find_value_reference(
+                section_dir, macro, exclude={library_name}) is not None,
+            exclude={library_name})
 
-    check_values_loaded(section_dir, library_name)
-    return library_path
+    written = []
+    for target in plan.targets:
+        section_dir = target.section_dir
+        library_path = section_dir / library_name
+        _write_tagged_block(library_path, name, block, kind="value")
+        written.append(library_path)
+        if target.document is not None:
+            _record_library_entry(target, plan.analysis, key, library_path, name,
+                                  notebook, macro=macro)
+
+        if add_reference:
+            already = find_value_reference(section_dir, macro, exclude={library_name})
+            if already is not None:
+                print(f"\\{macro} is already used in {already.name}; no reference appended.")
+            elif tex is not False:
+                _append_commented_block(section_dir, f"\\{macro}", exclude={library_name},
+                                        tex_name=None if tex in (None, True) else tex)
+
+        check_values_loaded(section_dir, library_name)
+    return _single_or_list(written)

@@ -309,6 +309,6 @@ def test_one_parity_baseline_covers_both_backends(document, kaleido, tmp_path):
     baseline_path = tmp_path / "baseline.json"
     assert snapshot(repo, html_dir=html_dir, baseline_path=baseline_path) == 0
 
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))["documents"]["repo"]
     assert set(baseline) == {"from_plotly.png", "from_matplotlib.png"}
     assert all(entry["width"] == 1125 for entry in baseline.values())

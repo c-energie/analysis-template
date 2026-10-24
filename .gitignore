@@ -8,6 +8,12 @@
 /figures_html/
 figures_manifest.json
 
+# ---- no-document output ----
+# Where the savers write when no document is configured (no-document mode). Build
+# output like the exports above; once a document is set, re-running the notebooks puts
+# the figures there, and this directory is left alone rather than migrated.
+/outputs/
+
 # ---- local configuration ----
 # DOC_REPO and friends live here rather than in a shell profile, so a second checkout
 # cannot silently inherit the first one's document repo. Per-machine paths, never

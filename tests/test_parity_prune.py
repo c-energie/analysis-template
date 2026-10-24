@@ -142,7 +142,8 @@ def test_snapshot_stops_reporting_a_figure_once_pruned(layout, tmp_path, capsys)
     snapshot(doc, html_dir, baseline_path=baseline)
     out = capsys.readouterr().out
     assert "skipped:" not in out
-    assert set(json.loads(baseline.read_text(encoding="utf-8"))) == {"bar.png"}
+    recorded = json.loads(baseline.read_text(encoding="utf-8"))
+    assert set(recorded["documents"]["doc"]) == {"bar.png"}
 
 
 def test_snapshot_gives_no_prune_hint_for_a_figure_outside_the_repo(layout, tmp_path,

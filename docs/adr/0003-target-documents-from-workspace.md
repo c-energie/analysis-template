@@ -21,6 +21,15 @@ The silent case is the common one. `setup-doc-publish` writes `DOC_REPO` into an
 
 With several target documents, a single saver call writes to all of them, and `documents=` can narrow that to a subset. Every target is checked before anything is written. Clashes are refused, not renamed. The first analysis to write a figure filename, table tag or value macro into a document is its **owner**, recorded in that document's `figures_manifest.json`. AGENTS.md's rule never to rename a figure rules out per-analysis prefixes.
 
+## Settled in implementation (#25)
+
+- **The order of the structure** is the list above: this repo's own `layout.toml`, then the host's, then `workspace.json`. A nested analysis that the workspace also lists (project-workspace records one, `documents: ["<doc>"]`, so the workspace can be restored) resolves from its layout, and the workspace entry is not read.
+- **An empty `documents` list counts as the structure speaking**, not as its silence. With `[]` and a `DOC_REPO` set, the save raises instead of falling back to `DOC_REPO`: `detach-analysis` empties the list and leaves `.env` alone, and honouring the leftover `DOC_REPO` would keep feeding the document just detached. A member with no `documents` key at all (written before claude-tools#41) is treated as not attached, so `DOC_REPO` alone still works for it.
+- **Owner names**: a workspace analysis is its member `dir`; any other analysis its checkout's directory name.
+- **Paths in a document's manifest are relative to the manifest file**, `interactive` included (`../<analysis>/figures_html/<stem>.html`), because that is how doc-publish's FigureEmitter already resolves them (doc-publish#3) — not relative to the workspace root, as first written in #25.
+- **Ownership keys** are per document, mirroring LaTeX's namespaces: a figure by its label and its PNG's bare filename, a table by its tag, a value by its macro and its block's tag.
+- **An explicit absolute `section=`** (tests, exploratory runs) consults no target document, as before: its manifest stays in the html directory and has no owner.
+
 ## Considered Options
 
 - **`DOC_REPO` keeps winning, and narrows the targets to the one it names.** Rejected: a `.env` written for doc-publish would quietly stop every other target document from receiving figures.
