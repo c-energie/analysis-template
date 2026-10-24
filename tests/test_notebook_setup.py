@@ -240,6 +240,8 @@ def test_outside_every_checkout_the_installed_one_is_used(shared_venv):
 
 
 def test_inside_the_installed_checkout_nothing_changes(shared_venv):
+    """The single-checkout case the cwd-first rule must not disturb: a warning here would
+    fire in every ordinary notebook, and a moved config would gate it by another file."""
     os.chdir(shared_venv.a / "notebooks")
 
     root, messages = setup_recording_warnings(shared_venv.package_dir)
