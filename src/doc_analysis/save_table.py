@@ -4,9 +4,12 @@ from pathlib import Path
 import pandas as pd
 
 from doc_analysis.save_figure import (
+    LEGACY_SECTIONS_DIRNAME,
+    SECTIONS_DIRNAME,
     _append_commented_block,
     _one_of,
     _resolve_section_dir,
+    search_root,
 )
 
 LIBRARY_NAME = "tables.tex"
@@ -65,6 +68,25 @@ def find_table_reference(section_dir, tag, exclude=()):
             if pattern.search(raw_line.lstrip().lstrip("%").strip()):
                 return tex_path
     return None
+
+
+def _library_reference_path(section_dir, library_name=LIBRARY_NAME):
+    """The library path to write inside \\ExecuteMetaData[...], relative to the document root.
+
+    Sections are pulled into main.tex with \\subfile, so TeX resolves the path from the
+    document root, not from the section: a bare ``tables.tex`` loads nothing in the full
+    build and the table silently never renders (issue #23). So the path is the section's
+    own, e.g. ``Sections/Results/ptg/tables.tex`` — the form the example section uses. A
+    section under no Sections/ (or legacy Chapters/) directory, which is what a test's
+    temporary section is, has no document root to be relative to and keeps the bare name.
+    """
+    sections_root = search_root(section_dir)
+    if sections_root.name not in (SECTIONS_DIRNAME, LEGACY_SECTIONS_DIRNAME):
+        return library_name
+    # Lexical, not resolved: sections_root is an ancestor of section_dir by construction,
+    # so this cannot fail, whereas resolving a symlinked section follows it out of the
+    # document and raises after tables.tex is already written. TeX sees the link's path.
+    return (Path(section_dir).relative_to(sections_root.parent) / library_name).as_posix()
 
 
 def _build_table_block(tabular_latex, caption, label):
@@ -133,8 +155,10 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
     place rather than adding a duplicate, so one file accumulates all of the leaf
     directory's tables.
 
-    Pull an individual table into the prose with \\ExecuteMetaData[tables.tex]{name}
-    (requires \\usepackage{catchfilebetweentags}). When add_reference is True that command is
+    Pull an individual table into the prose with
+    \\ExecuteMetaData[Sections/<section>/tables.tex]{name}, the path relative to the
+    document root because sections are \\subfile-d into main.tex (requires
+    \\usepackage{catchfilebetweentags}). When add_reference is True that command is
     appended, commented out, to a .tex file in the chosen directory as a ready-to-place
     snippet — but only if no .tex in the section pulls the tag in already (commented or
     live), so re-saving never accumulates duplicate snippets. tex names the target file,
@@ -166,7 +190,8 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
             print(f"Table '{tag}' is already pulled in by {already.name}; "
                   f"no reference appended.")
         elif tex is not False:
-            reference = f"\\ExecuteMetaData[{library_name}]{{{tag}}}"
+            library_ref = _library_reference_path(section_dir, library_name)
+            reference = f"\\ExecuteMetaData[{library_ref}]{{{tag}}}"
             _append_commented_block(section_dir, reference, exclude={library_name},
                                     tex_name=None if tex is True else tex)
 

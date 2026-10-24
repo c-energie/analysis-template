@@ -40,7 +40,7 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from doc_analysis.env import LAST_SEARCH, describe_search
+from doc_analysis.env import LAST_SEARCH, analysis_root, describe_search
 from doc_analysis.layout import find_host_layout, find_layout
 
 DOC_REPO_ENV = "DOC_REPO"
@@ -53,8 +53,25 @@ SECTIONS_DIRNAME = "Sections"
 LEGACY_SECTIONS_DIRNAME = "Chapters"
 MANIFEST_NAME = "figures_manifest.json"
 
-# Repo-relative default for the interactive exports (gitignored; see module docstring).
-DEFAULT_HTML_DIR = Path(__file__).resolve().parents[2] / "figures_html"
+HTML_DIRNAME = "figures_html"
+
+
+def default_html_dir():
+    """The active checkout's `figures_html/` (gitignored; see module docstring).
+
+    Resolved per call against the active checkout (`env.analysis_root`), not once from
+    `__file__`: with two checkouts in one venv that sent both repos' manifests and
+    interactive exports into the imported package's checkout.
+    """
+    return analysis_root() / HTML_DIRNAME
+
+
+def __getattr__(name):
+    # The pre-#24 constant, still importable for code that reads it; now resolved on access.
+    if name == "DEFAULT_HTML_DIR":
+        return default_html_dir()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Artifact sub-directories (figures/tables) are save targets, not sections to descend into.
 ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
@@ -256,22 +273,26 @@ def _append_commented_block(section_dir, block, exclude=(), tex_name=None):
     # Read without newline translation, so a rewrite below can leave every byte outside
     # the inserted block exactly as it was.
     existing = tex_path.read_bytes().decode("utf-8")
+    # Follow the file's own line endings rather than the platform's, in both branches: a
+    # text-mode write turns \n into \r\n on Windows, and an LF section came back with a
+    # CRLF block in it -- mixed endings, and noisy git and Overleaf diffs (issue #17).
+    newline = "\r\n" if "\r\n" in existing else "\n"
+    commented = commented.replace("\n", newline)
     end = _end_document_offset(existing)
     if end is None:
-        existing = tex_path.read_text(encoding="utf-8")
-        separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
-        with tex_path.open("a", encoding="utf-8") as tex_file:
-            tex_file.write(f"{separator}{commented}\n")
+        # Decide the separator on normalised endings: a CRLF file ending in a blank line
+        # ends in "\r\n\r\n", which endswith("\n\n") would miss.
+        tail = existing.replace("\r\n", "\n")
+        blank_lines = 0 if tail.endswith("\n\n") else 1 if tail.endswith("\n") else 2
+        # Append bytes, so nothing already in the file is re-encoded or translated.
+        with tex_path.open("ab") as tex_file:
+            tex_file.write(f"{newline * blank_lines}{commented}{newline}".encode("utf-8"))
     else:
         # A subfile ends in \end{document}, and LaTeX ignores everything after it: a block
         # appended there is uncommented by the author and then never renders, with no
-        # error (issue #4). Insert it before the line instead.
-        # The whole file is rewritten, so follow its line endings rather than the
-        # platform's: a CRLF document must not come back half LF, or wholly CRLF on Windows.
-        newline = "\r\n" if "\r\n" in existing else "\n"
+        # error (issue #4). Insert it before the line instead, rewriting the whole file.
         body = existing[:end].rstrip("\r\n")
         separator = newline * 2 if body else ""
-        commented = commented.replace("\n", newline)
         tex_path.write_bytes(
             f"{body}{separator}{commented}{newline * 2}{existing[end:]}".encode("utf-8"))
 
@@ -441,7 +462,7 @@ def _resolve_html_dir(html_dir):
     holds figures_manifest.json — so a matplotlib-only project gets this directory too,
     containing the manifest and nothing else.
     """
-    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     html_dir.mkdir(parents=True, exist_ok=True)
     return html_dir
 
@@ -456,7 +477,62 @@ def _write_static_png(fig, save_path, **write_image_kwargs):
             "the plotly extra installs:\n"
             "    uv sync --extra plotly    (or: uv add kaleido / pip install kaleido)"
         ) from exc
-    fig.write_image(str(save_path), **write_image_kwargs)
+    before = _file_state(save_path)
+    try:
+        fig.write_image(str(save_path), **write_image_kwargs)
+    except RuntimeError as exc:
+        if not _raised_by_choreographer(exc):
+            raise
+        # kaleido 1.x renders through choreographer, whose Chrome teardown races on
+        # Windows: "Couldn't close or kill browser subprocess" is raised from
+        # Browser._close *after* the PNG is on disk (issue #22). Failing the save there
+        # stops an unattended nbconvert run over a figure that was written. But a PNG
+        # merely existing proves nothing - a committed figure from the last run is
+        # there too - so accept only one this call wrote, completely; else retry once.
+        if _png_written_since(save_path, before):
+            warnings.warn(
+                f"Ignored a browser-close failure after writing '{save_path.name}' "
+                f"(kaleido/choreographer: {exc}). The PNG is complete.",
+                stacklevel=3,
+            )
+            return
+        fig.write_image(str(save_path), **write_image_kwargs)
+
+
+def _file_state(path):
+    """(mtime_ns, size) of path, or None if absent - to tell a fresh write from a stale file."""
+    try:
+        stat = Path(path).stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _raised_by_choreographer(exc):
+    """True if the traceback passes through choreographer, kaleido's browser driver.
+
+    The close failure is a bare RuntimeError, so its type says nothing; where it came
+    from does. Any other RuntimeError from write_image is a real failure and propagates.
+    """
+    tb = exc.__traceback__
+    while tb is not None:
+        if "choreographer" in Path(tb.tb_frame.f_code.co_filename).parts:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def _png_written_since(path, before):
+    """True if path now holds a complete PNG that differs from the `before` state.
+
+    Complete means the signature at the start and the IEND chunk at the end, so a file
+    truncated by a browser killed mid-write is not mistaken for a finished figure.
+    """
+    after = _file_state(path)
+    if after is None or after == before or after[1] == 0:
+        return False
+    data = Path(path).read_bytes()
+    return data.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in data[-12:]
 
 
 def _matplotlib_figure():

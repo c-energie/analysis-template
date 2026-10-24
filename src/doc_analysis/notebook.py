@@ -8,7 +8,13 @@ the working directory. In a document workspace the analysis repo is a member *be
 workspace root, and an IDE that opens the workspace as the project starts its kernel
 there — so the walk found nothing, and even past it the `.env` holding `DOC_REPO` was
 never reached. The package is installed (editable) into the workspace venv, so it already
-knows where its checkout is: that, not the working directory, is what locates the repo.
+knows where its checkout is: that is what locates the repo when the working directory is
+in none.
+
+When the working directory *is* in a checkout, that checkout wins. Two analysis repos
+installed into one venv share whichever `doc_analysis` comes first on `sys.path`, so the
+package's location named the same checkout for both, and the other's notebooks wrote into
+its document (issue #24). Only the cwd tells them apart.
 
 Idempotent: a notebook re-running its setup cell, or importing the compatibility module
 after calling this, changes nothing the first call did not.
@@ -16,6 +22,7 @@ after calling this, changes nothing the first call did not.
 
 import os
 import sys
+import warnings
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -27,20 +34,35 @@ NOTEBOOKS_DIRNAME = "notebooks"
 def notebook_setup(package_dir=None):
     """Load the env, style the backend, move to the analysis repo root; return the root.
 
+    The root is the active checkout (`env.active_checkout`): the analysis checkout the
+    working directory is in, else the one the package is installed from. When the two
+    differ it warns, naming both — the code running is the installed checkout's, which
+    may not be the version the active one expects — and carries on with the active one.
+
     The `.env` resolution is the usual one (real variable, `$DOC_ENV`, nearest `.env`
-    above the cwd), then — only if that found nothing — the `.env` of the checkout the
-    package is installed from. A real environment variable is never overridden.
+    above the cwd), then — only if that found nothing — the active checkout's `.env`. A
+    real environment variable is never overridden.
 
     The repo's `notebooks/` goes on `sys.path`, so a helper module kept beside the
     notebooks imports from a notebook in any sub-folder.
 
-    `package_dir` stands in for this package's installed location, for tests. When it is
-    not inside a checkout (a non-editable install) the fallback is skipped, the working
-    directory is left alone and the root returned is the one holding the `.env` used,
-    else the cwd; `document_repo()` then explains what was searched.
+    `package_dir` stands in for this package's installed location, for tests. When the
+    cwd is in no checkout and `package_dir` is not inside one either (a non-editable
+    install) the fallback is skipped, the working directory is left alone and the root
+    returned is the one holding the `.env` used, else the cwd; `document_repo()` then
+    explains what was searched.
     """
-    root = env.checkout_root(package_dir)
     installed_from = Path(package_dir) if package_dir else Path(env.__file__).resolve().parent
+    installed = env.checkout_root(installed_from)
+    root = env.active_checkout(package_dir=installed_from)
+    if root is not None and root != installed:
+        # Not an error: running another checkout's notebooks from a shared venv is the
+        # case this resolution exists for. But the code is not this checkout's own.
+        source = installed if installed is not None else installed_from
+        warnings.warn(f"notebook_setup(): working in the analysis checkout {root}, but "
+                      f"doc_analysis is imported from {source}. Figures, config and "
+                      f"DOC_REPO follow {root}; the code running is {source}'s.",
+                      stacklevel=2)
     found = env.load_env(fallback=root, skipped_checkout=installed_from if root is None else None)
     _style()
 

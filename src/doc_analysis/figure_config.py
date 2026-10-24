@@ -43,11 +43,28 @@ import sys
 import tomllib
 from pathlib import Path
 
+from doc_analysis.env import analysis_root
+
 CONFIG_ENV = "FIGURES_CONFIG"
 CONFIG_NAME = "figures_config.toml"
 
-# Repo-relative default, resolved the same way as DEFAULT_HTML_DIR in save_figure.
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / CONFIG_NAME
+
+def default_config_path():
+    """The active checkout's config file, resolved per call (see `env.analysis_root`).
+
+    Not a constant computed from `__file__`: with two checkouts in one venv that named
+    the imported package's config for both, so one repo's notebooks were gated by the
+    other's switches.
+    """
+    return analysis_root() / CONFIG_NAME
+
+
+def __getattr__(name):
+    # The pre-#24 constant, still importable for code that reads it; now resolved on access.
+    if name == "DEFAULT_CONFIG_PATH":
+        return default_config_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 FIGURES = "figures"
 TABLES = "tables"
@@ -89,7 +106,7 @@ _BOOTSTRAP = bootstrap_text()
 
 def config_path(path=None):
     """The config file: argument, else $FIGURES_CONFIG, else the repo default."""
-    return Path(path or os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG_PATH)
+    return Path(path or os.environ.get(CONFIG_ENV) or default_config_path())
 
 
 def load_config(path=None):

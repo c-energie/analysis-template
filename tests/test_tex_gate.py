@@ -170,6 +170,59 @@ def test_table_snippet_is_appended_once(tmp_path):
     assert (tmp_path / "tables.tex").read_text(encoding="utf-8").count("%<*fresh_tag>") == 1
 
 
+def test_table_snippet_path_is_relative_to_the_document_root(tmp_path):
+    """Sections are \\subfile-d into main.tex, so TeX resolves the library path from the
+    document root: a bare `tables.tex` rendered nothing in the full build (issue #23)."""
+    section = tmp_path / "doc" / "Sections" / "Results" / "ptg"
+    section.mkdir(parents=True)
+    tex = section / "ptg.tex"
+    tex.write_text("", encoding="utf-8")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=section)
+    text = tex.read_text(encoding="utf-8")
+    assert "\\ExecuteMetaData[Sections/Results/ptg/tables.tex]{fresh_tag}" in text
+    assert "[tables.tex]" not in text
+
+
+def test_table_snippet_path_in_a_pre_rename_document(tmp_path):
+    """A document still laid out under Chapters/ gets the path it actually has."""
+    section = tmp_path / "doc" / "Chapters" / "Intro"
+    section.mkdir(parents=True)
+    tex = section / "intro.tex"
+    tex.write_text("", encoding="utf-8")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=section)
+    assert ("\\ExecuteMetaData[Chapters/Intro/tables.tex]{fresh_tag}"
+            in tex.read_text(encoding="utf-8"))
+
+
+def test_table_snippet_path_through_a_symlinked_section(tmp_path):
+    """A section symlinked in from outside the document is referenced by the path TeX
+    sees from the root; resolving it first escaped the root and raised after tables.tex
+    was already written."""
+    target = tmp_path / "elsewhere" / "ptg"
+    target.mkdir(parents=True)
+    (target / "ptg.tex").write_text("", encoding="utf-8")
+    sections = tmp_path / "doc" / "Sections"
+    sections.mkdir(parents=True)
+    try:
+        (sections / "ptg").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks not permitted here")
+
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=sections / "ptg")
+    assert ("\\ExecuteMetaData[Sections/ptg/tables.tex]{fresh_tag}"
+            in (target / "ptg.tex").read_text(encoding="utf-8"))
+
+
+def test_table_snippet_outside_a_document_keeps_the_bare_name(tmp_path):
+    """With no Sections/ ancestor there is no document root to be relative to."""
+    tex = tmp_path / "section.tex"
+    tex.write_text("", encoding="utf-8")
+    save_document_table(pd.DataFrame({"a": [1.0]}), "fresh_tag", section=tmp_path)
+    assert "\\ExecuteMetaData[tables.tex]{fresh_tag}" in tex.read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------- \end{document}
 
 SUBFILE = ("\\documentclass[../../main.tex]{subfiles}\n"
@@ -269,6 +322,27 @@ def test_crlf_file_keeps_crlf_line_endings(tmp_path):
     assert "\n" not in raw.replace("\r\n", "")
     assert raw.startswith(SUBFILE.replace("\n", "\r\n").split("\\end{document}")[0].rstrip())
     assert raw.endswith("% \\end{figure}\r\n\r\n\\end{document}\r\n")
+
+
+def test_crlf_fragment_keeps_crlf_line_endings(tmp_path):
+    """The append branch wrote the block in the platform's endings, not the file's: an LF
+    section on Windows came back with a CRLF block, and a CRLF one elsewhere with an LF
+    block -- mixed endings either way (issue #17)."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\r\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    raw = tex.read_bytes().decode("utf-8")
+    assert "\n" not in raw.replace("\r\n", "")
+    assert raw.startswith("Some prose.\r\n\r\n% \\begin{figure}[H]\r\n")
+    assert raw.endswith("% \\end{figure}\r\n")
+
+
+def test_crlf_fragment_ending_in_blank_line_gets_no_extra_one(tmp_path):
+    """A CRLF file already ending in a blank line ends in \\r\\n\\r\\n, which a check for
+    "\\n\\n" misses: the block would be appended after two blank lines instead of one."""
+    tex = _write_bytes(tmp_path / "section.tex", "Some prose.\r\n\r\n")
+    add_commented_figure_to_tex("brand_new.png", tmp_path)
+    raw = tex.read_bytes().decode("utf-8")
+    assert raw.startswith("Some prose.\r\n\r\n% \\begin{figure}[H]\r\n")
 
 
 # --------------------------------------------------------------- real repo
