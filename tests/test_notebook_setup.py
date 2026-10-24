@@ -106,7 +106,19 @@ def test_a_plain_load_env_does_not_reach_the_checkout(workspace):
     assert "DOC_REPO" not in os.environ
 
 
-def test_outside_a_checkout_the_error_says_where_it_looked(workspace, tmp_path):
+def no_document_notice(monkeypatch, capsys):
+    """The once-per-process line a save prints in no-document mode, printed afresh."""
+    monkeypatch.setitem(save_figure._NO_DOCUMENT_NOTICE, "shown", False)
+    capsys.readouterr()
+    save_figure._announce_no_document()
+    return capsys.readouterr().out
+
+
+def test_outside_a_checkout_the_notice_says_where_it_looked(workspace, tmp_path,
+                                                            monkeypatch, capsys):
+    """Nothing found is no-document mode now, not an error (issue #20) — so the search
+    record moved into the notice: a non-editable install is the one cause of landing in
+    no-document mode by accident that its own message can name."""
     # A wheel in site-packages: two levels up holds no pyproject.toml.
     wheel = tmp_path / "venv" / "site-packages" / "doc_analysis"
     wheel.mkdir(parents=True)
@@ -114,21 +126,22 @@ def test_outside_a_checkout_the_error_says_where_it_looked(workspace, tmp_path):
     notebook_setup(package_dir=wheel)
 
     assert os.getcwd() == str(workspace.root)
-    with pytest.raises(RuntimeError) as raised:
-        document_repo()
-    message = str(raised.value)
+    assert document_repo() is None
+    message = no_document_notice(monkeypatch, capsys)
     assert str(workspace.root) in message
     assert "non-editable" in message
 
 
-def test_a_checkout_without_a_dotenv_names_the_file_it_wanted(workspace):
+def test_a_checkout_without_a_dotenv_names_the_file_it_wanted(workspace, monkeypatch,
+                                                              capsys):
     (workspace.analysis / ".env").unlink()
 
     notebook_setup(package_dir=workspace.package_dir)
 
-    with pytest.raises(RuntimeError, match="DOC_REPO is not set") as raised:
-        document_repo()
-    assert str(workspace.analysis / ".env") in str(raised.value)
+    assert document_repo() is None
+    message = no_document_notice(monkeypatch, capsys)
+    assert str(workspace.analysis / ".env") in message
+    assert message.count("\n") == 1
 
 
 # --- two analysis checkouts sharing one venv (issue #24) ------------------------------

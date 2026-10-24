@@ -242,9 +242,15 @@ def resolve_tex(section, tex):
     from doc_analysis.save_figure import GENERATED_TEX_NAMES, document_repo, sections_dir
 
     try:
-        document_repo()
+        repo = document_repo()
     except (RuntimeError, NotADirectoryError) as exc:
         print(f"note: section not checked -- {exc}".splitlines()[0], file=sys.stderr)
+        return tex
+    if repo is None and not Path(section).is_absolute():
+        # No-document mode: the notebook saves to outputs/ until a document is set, so
+        # there is no section to check yet, and refusing here would block the very
+        # analysis that comes before the write-up.
+        print("note: section not checked -- no document is configured", file=sys.stderr)
         return tex
     section_dir = Path(section) if Path(section).is_absolute() else sections_dir() / section
     if not section_dir.is_dir():

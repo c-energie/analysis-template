@@ -33,8 +33,9 @@ from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _local_section_dir,
     _one_of,
-    _resolve_section_dir,
+    _resolve_save_target,
     search_root,
 )
 from doc_analysis.save_table import _write_tagged_block
@@ -238,11 +239,19 @@ def save_document_value(name, value, fmt=None, decimals=2, unit=None, scale=None
 
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
+
+    With no document configured, a relative section's values.tex is written to
+    `outputs/<section>/` in the active checkout instead; nothing else is touched.
     """
     check_value_name(name)
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_section_dir(section, sections_root)
+    section_dir = _resolve_save_target(section, sections_root)
+    # No document: values.tex goes to outputs/<section>/, with no reference to append and
+    # no preamble to check for the line that loads it.
+    in_document = section_dir is not None
+    if not in_document:
+        section_dir = _local_section_dir(section)
     library_path = section_dir / library_name
 
     macro = _check_macro(macro) if macro is not None else macro_name(name)
@@ -251,6 +260,9 @@ def save_document_value(name, value, fmt=None, decimals=2, unit=None, scale=None
     _refuse_macro_clash(library_path, name, macro)
     _write_tagged_block(library_path, name, _build_value_block(macro, rendered, notebook),
                         kind="value")
+
+    if not in_document:
+        return library_path
 
     if add_reference:
         already = find_value_reference(section_dir, macro, exclude={library_name})

@@ -25,7 +25,10 @@ matplotlib figure is covered by both checks exactly as a plotly one is.
 The LaTeX repo is an input, located via the DOC_REPO environment variable (the
 same convention the publishing agent uses), else — in the nested layout — via the
 committed layout.toml: this repo's or, when this repo is the nested one, its host's.
-This package never hardcodes a user path.
+This package never hardcodes a user path. When none of those names a document — an
+analysis repo standing alone, before there is a write-up — that is no-document mode: the
+PNG goes to the checkout's own `outputs/figures/` and nothing touches a .tex file, so the
+same notebook lands its figures in the document once one is configured.
 
 Publishing note: anything entering this pipeline has already been approved for
 publication (standing policy, 2026-08-05), so the gate is upstream rather than here.
@@ -94,8 +97,12 @@ def document_repo():
     either layout still wins but warns: it is almost always a `.env` left over from
     before the nesting.
 
-    Raises with an actionable message rather than guessing: writing a figure into the
-    wrong tree would silently break the document build.
+    Returns None when none of those sources names a document at all: no-document mode,
+    for an analysis repo that stands alone (see `local_output_dir`). Anything that names
+    one and is wrong — a `DOC_REPO` without Sections/, a nested dir not cloned yet, a host
+    layout naming another directory — raises with an actionable message rather than
+    guessing: writing a figure into the wrong tree would silently break the document
+    build, and falling back to local output would hide the mistake just as well.
     """
     value = os.environ.get(DOC_REPO_ENV)
     fallback = LAST_SEARCH["fallback"]
@@ -126,17 +133,22 @@ def document_repo():
                 f"    python setup_nested.py\n"
                 f"run in {hosted.root}."
             )
+    elif host is None:
+        # Nothing names a document: no-document mode, and the savers write to
+        # local_output_dir() instead. Never a guess at a document — only the absence of
+        # every source gets here; each misconfiguration above and below still raises.
+        return None
     else:
         # Saying where it looked is what tells a notebook started from the wrong
         # directory apart from a .env that is genuinely missing the line.
         looked = "".join(f"\n  - {line}" for line in describe_search())
-        if host is not None:
-            # A renamed nested checkout: the host's layout.toml names another directory,
-            # so the parent is not known to be this repo's document. Both names, because
-            # the fix is renaming one of them to the other.
-            looked += (f"\n  - {host.layout.file} declares {host.layout.layout}, but its "
-                       f"nested_dir = {host.layout.nested_dir!r} is not this repo's "
-                       f"directory, {host.root.name!r}; rename one to match the other")
+        # A renamed nested checkout: the host's layout.toml names another directory, so
+        # the parent is not known to be this repo's document. Both names, because the
+        # fix is renaming one of them to the other. Not no-document mode: the host says a
+        # document is meant to be here, and saving locally would hide the rename.
+        looked += (f"\n  - {host.layout.file} declares {host.layout.layout}, but its "
+                   f"nested_dir = {host.layout.nested_dir!r} is not this repo's "
+                   f"directory, {host.root.name!r}; rename one to match the other")
         raise RuntimeError(
             f"{DOC_REPO_ENV} is not set. Add it to this repo's .env (copy .env.example),\n"
             f"    {DOC_REPO_ENV}=/path/to/my-document\n"
@@ -169,9 +181,84 @@ def sections_dir():
     """The Sections/ directory of the LaTeX document repo.
 
     Falls back to a legacy Chapters/ tree when that is the layout the document repo has.
+    Raises in no-document mode: there is no section tree, and a path made up relative to
+    the cwd would be a guess the savers' local output exists to avoid.
     """
     repo = document_repo()
+    if repo is None:
+        raise RuntimeError(f"No document is configured, so there is no {SECTIONS_DIRNAME}/ "
+                           f"directory. {_HOW_TO_CONFIGURE}")
+    return _sections_of(repo)
+
+
+def _sections_of(repo):
     return repo / (section_root_name(repo) or SECTIONS_DIRNAME)
+
+
+#: How to leave no-document mode, for every message that mentions it.
+_HOW_TO_CONFIGURE = (f"To save into a document, set {DOC_REPO_ENV} in this repo's .env "
+                     f"(copy .env.example), or nest this repo in a document.")
+
+#: Where a save goes in no-document mode, under the active checkout.
+OUTPUTS_DIRNAME = "outputs"
+LOCAL_FIGURES_DIRNAME = "figures"
+
+
+def local_output_dir():
+    """`<active checkout>/outputs`: where saves go when no document is configured.
+
+    The one place that path is spelled, shared by the three savers and by
+    `check-figure-parity`, so a snapshot always looks where the savers wrote. Resolved
+    per call against the active checkout, like `default_html_dir`.
+    """
+    return analysis_root() / OUTPUTS_DIRNAME
+
+
+# Once per process, not per save: a notebook saving thirty figures should say where they
+# went, not say it thirty times until the line is scrolled past unread.
+_NO_DOCUMENT_NOTICE = {"shown": False}
+
+
+def _announce_no_document():
+    if _NO_DOCUMENT_NOTICE["shown"]:
+        return
+    _NO_DOCUMENT_NOTICE["shown"] = True
+    # Where it looked, because a notebook on the wrong interpreter or started outside its
+    # checkout lands here too, and the search record is what tells the two apart.
+    looked = "; ".join(describe_search())
+    print(f"No document configured: saving to {local_output_dir()} instead "
+          f"(figures in {LOCAL_FIGURES_DIRNAME}/, tables and values under the section). "
+          f"{_HOW_TO_CONFIGURE}" + (f" Searched: {looked}." if looked else ""))
+
+
+def _local_section_dir(section):
+    """`outputs/<section>` for a relative section name, created; no-document mode only."""
+    # In a document the section must already exist, which keeps `..` inside Sections/ in
+    # practice; here the directory is created, so `..` would write outside outputs/.
+    if ".." in Path(section).parts:
+        raise ValueError(f"section={str(section)!r} must stay inside {OUTPUTS_DIRNAME}/ "
+                         f"in no-document mode; drop the '..'.")
+    section_dir = local_output_dir() / section
+    section_dir.mkdir(parents=True, exist_ok=True)
+    return section_dir
+
+
+def _resolve_save_target(section, sections_root=None):
+    """The document's section directory for a save, or None in no-document mode.
+
+    No-document mode applies only where the document would have been consulted — a
+    relative section with no sections_root. An absolute section or an explicit root is
+    used exactly as before, document or not; and section=None still reaches the picker,
+    which raises without a document rather than prompting over nothing. On None the
+    caller writes under `local_output_dir()`; the notice has already been printed.
+    """
+    if section is not None and sections_root is None and not Path(section).is_absolute():
+        repo = document_repo()
+        if repo is None:
+            _announce_no_document()
+            return None
+        sections_root = _sections_of(repo)
+    return _resolve_section_dir(section, sections_root)
 
 
 def chapters_dir():
@@ -611,6 +698,11 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
 
+    With no document configured (`document_repo()` is None) a relative section names
+    no directory, so the PNG goes to `outputs/figures/<name>` in the active checkout
+    instead and no .tex block is appended; the html directory and the manifest are
+    written as usual, the manifest's `static` naming the local PNG.
+
     Plotly figures additionally write <stem>.html into the local html directory
     (html_dir argument, else $FIGURES_HTML_DIR, else the repo's figures_html/)
     with include_plotlyjs="directory", so one shared plotly.min.js sits alongside and
@@ -627,9 +719,13 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
     """
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_section_dir(section, sections_root)
+    section_dir = _resolve_save_target(section, sections_root)
 
-    figures_dir = section_dir / FIGURES_DIRNAME
+    # No document: one flat outputs/figures/, not one per section, because the bare
+    # filename is the key everywhere downstream and a section tree would only invite two
+    # figures of one name. The name itself is never changed.
+    figures_dir = (section_dir / FIGURES_DIRNAME if section_dir is not None
+                   else local_output_dir() / LOCAL_FIGURES_DIRNAME)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     save_path = figures_dir / name
@@ -684,7 +780,10 @@ def save_document_figure(name, fig=None, caption=None, label=None, *, section=No
         },
     )
 
-    add_commented_figure_to_tex(save_path.name, section_dir, caption=caption, label=label,
-                                tex=tex)
+    # No document, no .tex to hold the block. Re-run once a document is configured and
+    # the block is appended then, gated as always on the figure not being referenced.
+    if section_dir is not None:
+        add_commented_figure_to_tex(save_path.name, section_dir, caption=caption,
+                                    label=label, tex=tex)
 
     return save_path

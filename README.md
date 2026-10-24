@@ -131,6 +131,35 @@ python setup_nested.py
 
 Until then, saving a figure raises with that command in the message.
 
+### No document yet
+
+An analysis can come before its write-up, or be shared before any document is chosen.
+With **nothing** naming a document — no `DOC_REPO` in the environment or a `.env`, no
+`layout.toml` here, no host `layout.toml` naming this directory — this repo runs in
+**no-document mode**: `document_repo()` returns `None`, and the same notebooks save into
+this repo's own `outputs/` (gitignored) instead of raising:
+
+| Saved | Where, with no document |
+|---|---|
+| figure PNG | `outputs/figures/<name>.png` — the same bare filename, never prefixed |
+| interactive HTML, manifest | `figures_html/`, as always; the manifest's `static` names the local PNG |
+| `tables.tex`, `values.tex` | `outputs/<section>/` |
+| `\begin{figure}` block, table and value references | nothing: there is no prose to put them in |
+
+`figures_config.toml`, `section=` and `notebook=` and every return value behave as before.
+The first save of a process prints one line saying no document is configured, where the
+output went, and where it looked.
+
+It is entered **only when nothing is configured**. Anything that names a document and is
+wrong still raises exactly as before — a `DOC_REPO` without `Sections/`, a nested
+directory not cloned yet, a host `layout.toml` whose `nested_dir` is not this directory —
+because quietly saving locally would hide the mistake. So a `.env` line pointing at
+nothing is not a way to ask for it: leave the line out.
+
+To leave it, set `DOC_REPO` or nest this repo in a document, and re-run the notebooks:
+the figures land in the document as if no-document mode had never happened. `outputs/` is
+left as it is, not copied anywhere.
+
 ## Choosing a backend
 
 Neither backend is a hard dependency — you install exactly the one you use. There is no
@@ -345,10 +374,12 @@ from doc_analysis import notebook_setup, document_repo
 notebook_setup(); print(document_repo())
 ```
 
-It should print your document repo. If `DOC_REPO` is unset it raises, listing every place
-it looked for a `.env` — which tells a kernel on the wrong interpreter apart from a `.env`
-missing the line. (On a non-editable install there is no checkout to fall back to, so
-`notebook_setup()` leaves the working directory alone and the error says so.)
+It should print your document repo. `None` means nothing named one and this repo is in
+[no-document mode](#no-document-yet) — right for an analysis with no document yet, and a
+wrong interpreter or a `.env` missing its line otherwise. The first save then prints every
+place it looked for a `.env`, which tells those apart. (On a non-editable install there is
+no checkout to fall back to, so `notebook_setup()` leaves the working directory alone and
+that line says so.)
 
 Notebooks written against the old `from setup_notebook import ROOT` keep working:
 `notebooks/setup_notebook.py` is now a shim calling `notebook_setup()`.
@@ -390,6 +421,12 @@ The last one catches the quiet failure: a figure can be regenerated perfectly an
 invisible in the PDF because its `\begin{figure}` block was never written or is still
 commented out.
 
+In [no-document mode](#no-document-yet) `--snapshot` and the default check run against
+`outputs/`, and the baseline records `"target": "local"`. Checking a local baseline once
+a document is configured, or a document's baseline with none, fails with the reason
+rather than passing; re-snapshot after the move. `--figures` says there is no document
+and exits 0.
+
 ## Conventions that fail silently
 
 These are the ones worth knowing before you lose an afternoon.
@@ -421,7 +458,7 @@ These are the ones worth knowing before you lose an afternoon.
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |
-| `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Sections/<section>/Figures/`, a manifest entry, and — for a plotly figure — the interactive HTML. |
+| `save_figure.py` | `save_document_figure()`: PNG into `$DOC_REPO/Sections/<section>/Figures/` (`outputs/figures/` with no document), a manifest entry, and — for a plotly figure — the interactive HTML. Also `document_repo()` and `local_output_dir()`, which all three savers and the parity check share. |
 | `save_table.py` | `save_document_table()`: booktabs LaTeX into a per-section `tables.tex`, tagged so re-saving replaces in place. |
 | `save_value.py` | `save_document_value()`: a scalar as a LaTeX macro in a per-section `values.tex`, tagged like `tables.tex`; warns when the document does not load the file. |
 | `figure_config.py` | Reads `figures_config.toml` (stdlib `tomllib`, no dependency). Appends new entries textually, so your comments survive. |

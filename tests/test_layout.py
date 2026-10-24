@@ -109,11 +109,11 @@ def test_a_nested_dir_that_is_not_a_document_names_the_layout(host):
         document_repo()
 
 
-def test_without_a_layout_the_not_set_error_is_unchanged(host):
+def test_without_a_layout_or_doc_repo_it_is_no_document_mode(host):
+    """Nothing names a document, so there is none: None, not the "not set" error that
+    used to make a standalone analysis repo need a placeholder document (issue #20)."""
     (host / "layout.toml").unlink()
-    with pytest.raises(RuntimeError, match="DOC_REPO is not set") as raised:
-        document_repo()
-    assert "setup_nested" not in str(raised.value)
+    assert document_repo() is None
 
 
 def test_the_document_sides_layout_file_is_walked_past(host):
@@ -206,10 +206,10 @@ def test_the_host_layout_makes_the_parent_the_document_from_root_and_notebooks(h
 def test_a_kernel_started_in_the_host_finds_this_repo_through_the_checkout_fallback(
         hosted):
     """From the document's own directory the upward search never enters this repo, so its
-    root comes from the installed checkout notebook_setup() records."""
+    root comes from the installed checkout notebook_setup() records. Without it nothing
+    names a document — the host's file is only ever read as this repo's parent."""
     os.chdir(hosted)
-    with pytest.raises(RuntimeError, match="DOC_REPO is not set"):
-        document_repo()
+    assert document_repo() is None
     env.LAST_SEARCH["fallback"] = hosted / "my-thesis-analysis"
     assert document_repo() == hosted
 
@@ -300,8 +300,7 @@ def test_only_the_direct_parent_is_a_host(hosted):
     (deeper / "notebooks").mkdir(parents=True)
     (deeper / "pyproject.toml").write_text("[project]\nname = \"y\"\n", encoding="utf-8")
     os.chdir(deeper / "notebooks")
-    with pytest.raises(RuntimeError, match="DOC_REPO is not set"):
-        document_repo()
+    assert document_repo() is None
 
 
 def test_this_repos_own_layout_wins_over_the_hosts(hosted):

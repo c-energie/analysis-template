@@ -7,8 +7,9 @@ from doc_analysis.save_figure import (
     LEGACY_SECTIONS_DIRNAME,
     SECTIONS_DIRNAME,
     _append_commented_block,
+    _local_section_dir,
     _one_of,
-    _resolve_section_dir,
+    _resolve_save_target,
     search_root,
 )
 
@@ -169,10 +170,18 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
 
     chapter= and chapters_root= are the pre-rename spellings of section= and
     sections_root=. They still work and warn; passing both spellings raises.
+
+    With no document configured, a relative section's library is written to
+    `outputs/<section>/` in the active checkout instead, and no reference is appended.
     """
     section = _one_of("section", section, "chapter", chapter)
     sections_root = _one_of("sections_root", sections_root, "chapters_root", chapters_root)
-    section_dir = _resolve_section_dir(section, sections_root)
+    section_dir = _resolve_save_target(section, sections_root)
+    # No document: the library goes to outputs/<section>/ and there is no prose to hold
+    # a reference, so none is appended.
+    in_document = section_dir is not None
+    if not in_document:
+        section_dir = _local_section_dir(section)
     library_path = section_dir / library_name
 
     tag = Path(name).stem
@@ -184,7 +193,7 @@ def save_document_table(df, name, caption=None, label=None, sections_root=None,
     block = _build_table_block(tabular, caption, label)
     _write_table_to_library(library_path, tag, block)
 
-    if add_reference:
+    if add_reference and in_document:
         already = find_table_reference(section_dir, tag, exclude={library_name})
         if already is not None:
             print(f"Table '{tag}' is already pulled in by {already.name}; "

@@ -30,6 +30,16 @@ writes shows up in this repo's `git status`.
   name, `DOC_REPO` *is that parent* — so a checkout nested in a document writes into it
   with no `.env` at all. A `DOC_REPO` that disagrees with either layout still wins, with a
   warning.
+- **`document_repo()` returning `None` is no-document mode, not a bug to fix.** It is
+  entered only when *nothing* names a document — no `DOC_REPO`, no layout on either side
+  — and the savers then write to this checkout's gitignored `outputs/` (figures in
+  `outputs/figures/`, `tables.tex`/`values.tex` in `outputs/<section>/`), touch no `.tex`,
+  and print one line saying so. Anything that names a document and is wrong still raises;
+  keep it that way, because a misconfiguration that fell back to `outputs/` would look
+  like a successful save. It is also where a notebook on the wrong interpreter can end
+  up, so when a save reports no document, check that before assuming none was intended.
+  Never "fix" it by setting `DOC_REPO`: whether this analysis has a document is the
+  author's call, and pointing it at a guess writes into someone's document.
 - **Never set `DOC_REPO` in a shell profile.** The moment there is a second document it
   points at the wrong one, and the failure is silent — figures land in another document.
 - For tests and exploratory runs, don't point `DOC_REPO` at a real document. `section=`

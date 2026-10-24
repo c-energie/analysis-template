@@ -29,6 +29,13 @@ Usage:
     check-figure-parity [--tolerance 0.05] [--stems stem1 stem2 ...]
     check-figure-parity --figures
     check-figure-parity --prune [--dry-run]         # drop entries whose PNG is gone
+
+**With no document configured** (no-document mode; see `document_repo`) the PNGs live
+in the checkout's `outputs/`, and `--snapshot` and the default check run against that
+instead. A baseline taken there says so (`"target": "local"`), and checking it against a
+document — or a document's baseline against `outputs/` — is an error, not a pass: the
+paths would resolve to nothing, or to a different set of figures. `--figures` has no
+section sources to read, says so, and exits 0.
 """
 
 import argparse
@@ -45,6 +52,7 @@ from doc_analysis.save_figure import (
     MANIFEST_NAME,
     figure_reference_state,
     default_html_dir,
+    local_output_dir,
     section_root_name,
     document_repo as resolve_document_repo,
 )
@@ -62,6 +70,20 @@ def png_size(path):
 # The baseline is tooling data and lives with the tooling; only the PNGs it describes
 # live in the LaTeX repo, resolved against document_repo below.
 BASELINE_RELATIVE = Path("docs") / "figure_png_baseline.json"
+
+
+#: Marks a baseline taken in no-document mode. A document's baseline carries no marker —
+#: it is written exactly as before no-document mode existed, so committed baselines read
+#: unchanged. Never a figure's key: those are filenames, which always have a suffix.
+TARGET_KEY = "target"
+LOCAL_TARGET = "local"
+
+
+def _target(document_repo):
+    """(root the baseline paths are relative to, is_local) for a run."""
+    if document_repo is None:
+        return local_output_dir(), True
+    return Path(document_repo), False
 
 
 def default_baseline_path():
@@ -87,7 +109,11 @@ def snapshot(document_repo, html_dir=None, baseline_path=None):
     exactly the figures this pipeline produces and not, say, a logo committed by hand.
     Run it once the figures look right; re-run it deliberately when a size change is
     intended, and commit the diff so the change is reviewable.
+
+    document_repo None is no-document mode: paths are recorded relative to `outputs/`,
+    and the baseline is marked local.
     """
+    root, local = _target(document_repo)
     html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     manifest_path = html_dir / MANIFEST_NAME
     if not manifest_path.exists():
@@ -104,19 +130,22 @@ def snapshot(document_repo, html_dir=None, baseline_path=None):
             continue
         width, height = png_size(static)
         try:
-            relative = static.relative_to(document_repo)
+            relative = static.relative_to(root)
         except ValueError:
-            missing.append(f"{static} (outside {document_repo})")
+            missing.append(f"{static} (outside {root})")
             continue
         baseline[static.name] = dict(path=str(relative).replace("\\", "/"),
                                      width=width, height=height,
                                      aspect=round(width / height, 6))
 
+    if local:
+        baseline[TARGET_KEY] = LOCAL_TARGET
     baseline_path = Path(baseline_path or default_baseline_path())
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
     baseline_path.write_text(json.dumps(baseline, indent=1, sort_keys=True) + "\n",
                              encoding="utf-8")
-    print(f"Wrote {len(baseline)} figure(s) to {baseline_path}")
+    print(f"Wrote {len(baseline) - local} figure(s) to {baseline_path}"
+          + (f" (no document: relative to {root})" if local else ""))
     for line in missing:
         print(f"  skipped: {line}")
     # Without the hint a retired figure is reported as skipped on every run, and the only
@@ -181,6 +210,12 @@ def prune(html_dir=None, dry_run=False):
 
 
 def check(document_repo, tolerance, stems=None, baseline_path=None):
+    """Compare every baseline figure's current PNG with its recorded dimensions.
+
+    document_repo None is no-document mode: the PNGs are looked for under `outputs/`,
+    and only a baseline marked local is accepted.
+    """
+    root, local = _target(document_repo)
     baseline_path = Path(baseline_path or default_baseline_path())
     if not baseline_path.exists():
         print(f"No baseline at {baseline_path}.\n"
@@ -189,6 +224,22 @@ def check(document_repo, tolerance, stems=None, baseline_path=None):
         return 0
 
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    recorded_local = baseline.pop(TARGET_KEY, None) == LOCAL_TARGET
+    if recorded_local != local:
+        # Either way round every path resolves against the wrong root: each figure would
+        # be MISSING, or — where the names happen to exist in both — compared with a
+        # different file. Neither is a parity result, so neither may pass.
+        if local:
+            print(f"The baseline at {baseline_path} records figures in a document, but no "
+                  f"document is configured (no-document mode). Configure the document it "
+                  f"was taken against, or re-run `check-figure-parity --snapshot` to "
+                  f"record the local figures in {root}.")
+        else:
+            print(f"The baseline at {baseline_path} was taken with no document "
+                  f"(\"{TARGET_KEY}\": \"{LOCAL_TARGET}\"), but {root} is configured. "
+                  f"Re-run the notebooks so the figures land in the document, then "
+                  f"re-run `check-figure-parity --snapshot`.")
+        return 1
     if not baseline:
         print(f"Baseline at {baseline_path} is empty; nothing to check.")
         return 0
@@ -198,7 +249,7 @@ def check(document_repo, tolerance, stems=None, baseline_path=None):
         if stems and Path(name).stem not in stems:
             continue
         checked += 1
-        current = document_repo / ref["path"]
+        current = root / ref["path"]
         if not current.exists():
             failures.append(f"MISSING  {name}: expected at {ref['path']}")
             continue
@@ -212,7 +263,7 @@ def check(document_repo, tolerance, stems=None, baseline_path=None):
                 f"(dW {d_width:.1%}, dH {d_height:.1%}, aspect {d_aspect:.1%})"
             )
 
-    print(f"Checked {checked} baseline figures against {document_repo}")
+    print(f"Checked {checked} baseline figures against {root}")
     if failures:
         print(f"\n{len(failures)} parity failure(s):")
         print("\n".join(f"  {line}" for line in failures))
@@ -232,8 +283,14 @@ def check_figures_placed(document_repo, html_dir=None):
     Sections tree and buckets each figure by how it is referenced.
 
     Returns 0 always: a commented block is a legitimate work-in-progress state, not a
-    failure. This is a report, not a gate.
+    failure. This is a report, not a gate. With no document (document_repo None) there
+    are no section sources to read, which it says.
     """
+    if document_repo is None:
+        print("No document configured (no-document mode): there are no section sources "
+              "to check the saved figures against. Set DOC_REPO, or nest this repo in a "
+              "document, to report which figures it renders.")
+        return 0
     html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     manifest_path = html_dir / MANIFEST_NAME
     if not manifest_path.exists():
@@ -274,7 +331,8 @@ def check_figures_placed(document_repo, html_dir=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--document-repo", type=Path, default=None,
-                        help="LaTeX document repo root (default: the DOC_REPO env var)")
+                        help="LaTeX document repo root (default: the DOC_REPO env var, "
+                             "else layout.toml; with neither, the local outputs/)")
     # Default None, not 0.05, so that an explicit --tolerance can be told apart and
     # rejected alongside --prune; check() still gets 0.05.
     parser.add_argument("--tolerance", type=float, default=None,

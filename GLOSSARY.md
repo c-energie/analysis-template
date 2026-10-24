@@ -15,7 +15,7 @@ A document repo an analysis repo writes into: the host repo of a nested analysis
 _Avoid_: destination, output document
 
 **No-document mode**:
-An analysis repo with no target document, which keeps its figures, tables and values in its own `outputs/` until it gets one.
+An analysis repo with no target document, which keeps its figures, tables and values in its own `outputs/` until it gets one; entered only when nothing names a document, so a document named wrongly is still an error.
 _Avoid_: standalone mode, local mode
 
 **Owner**:
