@@ -38,12 +38,13 @@ import struct
 import sys
 from pathlib import Path
 
+from doc_analysis.env import analysis_root
 from doc_analysis.save_figure import (
     SECTIONS_DIRNAME,
-    DEFAULT_HTML_DIR,
     HTML_DIR_ENV,
     MANIFEST_NAME,
     figure_reference_state,
+    default_html_dir,
     section_root_name,
     document_repo as resolve_document_repo,
 )
@@ -60,10 +61,26 @@ def png_size(path):
 
 # The baseline is tooling data and lives with the tooling; only the PNGs it describes
 # live in the LaTeX repo, resolved against document_repo below.
-BASELINE_PATH = Path(__file__).resolve().parents[2] / "docs" / "figure_png_baseline.json"
+BASELINE_RELATIVE = Path("docs") / "figure_png_baseline.json"
 
 
-def snapshot(document_repo, html_dir=None, baseline_path=BASELINE_PATH):
+def default_baseline_path():
+    """The active checkout's baseline, resolved per call (see `env.analysis_root`).
+
+    Not computed from `__file__` at import: with two checkouts in one venv, one repo's
+    `--snapshot` overwrote the other's baseline and its checks ran against the wrong one.
+    """
+    return analysis_root() / BASELINE_RELATIVE
+
+
+def __getattr__(name):
+    # The pre-#24 constant, still importable for code that reads it; now resolved on access.
+    if name == "BASELINE_PATH":
+        return default_baseline_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def snapshot(document_repo, html_dir=None, baseline_path=None):
     """Record the current dimensions of every saved figure as the baseline to hold to.
 
     Reads the manifest rather than scanning the document repo, so the baseline covers
@@ -71,7 +88,7 @@ def snapshot(document_repo, html_dir=None, baseline_path=BASELINE_PATH):
     Run it once the figures look right; re-run it deliberately when a size change is
     intended, and commit the diff so the change is reviewable.
     """
-    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     manifest_path = html_dir / MANIFEST_NAME
     if not manifest_path.exists():
         print(f"No manifest at {manifest_path}: save a figure before snapshotting.")
@@ -95,7 +112,7 @@ def snapshot(document_repo, html_dir=None, baseline_path=BASELINE_PATH):
                                      width=width, height=height,
                                      aspect=round(width / height, 6))
 
-    baseline_path = Path(baseline_path)
+    baseline_path = Path(baseline_path or default_baseline_path())
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
     baseline_path.write_text(json.dumps(baseline, indent=1, sort_keys=True) + "\n",
                              encoding="utf-8")
@@ -119,7 +136,7 @@ def prune(html_dir=None, dry_run=False):
     DOC_REPO. A missing PNG is the only reason an entry goes; one that merely lies
     outside the document repo is a configuration question, not a retired figure.
     """
-    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     manifest_path = html_dir / MANIFEST_NAME
     if not manifest_path.exists():
         print(f"No manifest at {manifest_path}; nothing to prune.")
@@ -163,8 +180,8 @@ def prune(html_dir=None, dry_run=False):
     return 0
 
 
-def check(document_repo, tolerance, stems=None, baseline_path=BASELINE_PATH):
-    baseline_path = Path(baseline_path)
+def check(document_repo, tolerance, stems=None, baseline_path=None):
+    baseline_path = Path(baseline_path or default_baseline_path())
     if not baseline_path.exists():
         print(f"No baseline at {baseline_path}.\n"
               f"Run `check-figure-parity --snapshot` once the figures look right; "
@@ -217,7 +234,7 @@ def check_figures_placed(document_repo, html_dir=None):
     Returns 0 always: a commented block is a legitimate work-in-progress state, not a
     failure. This is a report, not a gate.
     """
-    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     manifest_path = html_dir / MANIFEST_NAME
     if not manifest_path.exists():
         print(f"No manifest at {manifest_path}; nothing to report.")

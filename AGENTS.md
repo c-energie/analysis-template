@@ -18,9 +18,11 @@ writes shows up in this repo's `git status`.
 - **Confirm `DOC_REPO` points at the document you think it does before running anything
   that saves.** Resolution (`src/doc_analysis/env.py`): a real environment variable wins,
   otherwise `$DOC_ENV`, otherwise the nearest `.env` above the cwd, otherwise — only via
-  `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the checkout the
-  package is installed from. So a notebook on the wrong interpreter can read *another*
-  checkout's `.env`; check `document_repo()`, not just that it is set. A `.env` never
+  `notebook_setup()` (`src/doc_analysis/notebook.py`) — the `.env` of the active
+  checkout: the analysis checkout the cwd is in, else the one the package is installed
+  from. So a notebook on the wrong interpreter, started outside its repo, can read
+  *another* checkout's `.env`; check `document_repo()`, not just that it is set. The
+  config, `figures_html/` and the parity baseline follow the active checkout too. A `.env` never
   overrides an explicit export. Then a `layout.toml` declaring
   `analysis-hosts-writing` (`src/doc_analysis/layout.py`) puts it at
   `<root>/<nested_dir>`. Last of all, if this checkout's parent has a `layout.toml`

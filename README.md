@@ -303,18 +303,26 @@ ROOT = notebook_setup()
 
 `notebook_setup()` loads this repo's `.env`, styles the installed backend, puts
 `notebooks/` on `sys.path` (so a helper module kept beside the notebooks imports from any
-sub-folder) and moves to this repo's root, which it returns. It finds the repo through the
-installed package, not the working directory — so the one thing that matters is that the
-kernel runs **the venv `doc_analysis` is installed into**: this repo's own `.venv`, whether
-it stands alone or is nested in its document repo:
+sub-folder) and moves to this repo's root, which it returns. The repo is the analysis
+checkout the working directory is in — the nearest directory above it holding both a
+`pyproject.toml` and `src/doc_analysis/` — and, when the kernel started in none, the one
+the installed package lives in. `figures_config.toml`, `figures_html/` and the parity
+baseline follow the same checkout. So the one thing that matters is that the kernel runs
+**the venv `doc_analysis` is installed into**: this repo's own `.venv`, whether it stands
+alone or is nested in its document repo:
 
 | | Interpreter |
 |---|---|
 | Windows | `<venv root>\.venv\Scripts\python.exe` |
 | macOS / Linux | `<venv root>/.venv/bin/python` |
 
-Pick any other and `import doc_analysis` fails, or — worse — imports a different checkout
-and writes into its document.
+Pick any other and `import doc_analysis` fails, or — worse — imports a different checkout,
+and a kernel started outside this repo writes into that checkout's document.
+
+Several analysis repos installed into one venv (a project workspace's) work, as long as
+each notebook's kernel starts inside its own repo: only the first `doc_analysis` on
+`sys.path` is imported, so `notebook_setup()` then warns, naming both checkouts — the code
+running is the other checkout's version — but writes into this repo's document.
 
 - **JupyterLab**: `uv run jupyter lab` from this repo. `uv run` uses the right venv, so
   there is nothing to select.
@@ -409,7 +417,7 @@ These are the ones worth knowing before you lose an afternoon.
 |---|---|
 | `env.py` | Reads a `.env` into the environment on import — `$DOC_ENV`, else the nearest above the cwd — without overriding what the shell already set. Stdlib; `KEY=value` needs no dependency. |
 | `layout.py` | Reads `layout.toml`, which in the nested layout puts the document repo at `<root>/<nested_dir>`, and — the other way up — the host document repo's, which makes the parent the document when it names this directory: `document_repo()`'s last two fallbacks. Stdlib `tomllib`. |
-| `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the installed checkout's `.env`, styles the backend, chdirs to the repo root. |
+| `notebook.py` | `notebook_setup()`: the one setup every notebook calls. Falls back to the active checkout's `.env` (the cwd's, else the installed one), styles the backend, chdirs to the repo root. |
 | `style.py` | The document's visual constants in no plotting library: serif stack matching LaTeX, CVD-validated palette (assign slots *in order*), diverging stops, print DPI. Both themes are built from it, so the backends cannot drift apart. Imports nothing. |
 | `theme.py` | The single plotly template, registered as the default **on import**. `figure_size(w, h)` in inches. Needs the `plotly` extra. |
 | `theme_mpl.py` | The matplotlib equivalent: the same values as rcParams, applied **on import**, plus the diverging colormap and `figure_size_in(w, h)`. Needs the `matplotlib` extra. |

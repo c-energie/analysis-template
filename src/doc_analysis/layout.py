@@ -17,7 +17,7 @@ directory. See docs/adr/0001-doc-repo-from-layout.md.
 The file is found nearly the way `.env` is: the nearest one above the working directory,
 but never above this repo's root, so it is reached from the root, from `notebooks/` and
 from inside the nested repo itself; then, for a notebook that called `notebook_setup()`,
-the checkout the package is installed from.
+the active checkout it recorded (the cwd's, else the one the package is installed from).
 
 `setup_nested.py` writes the file and cannot import this package (it runs before the
 install), so it carries its own reader.
@@ -156,7 +156,7 @@ def find_host_layout(start=None, fallback=None):
 
     This repo's root is the nearest directory above `start` (default: the cwd) holding a
     `pyproject.toml` — which reaches it from the root and from `notebooks/` — then
-    `fallback`, the installed checkout `notebook_setup()` records, for a kernel started
+    `fallback`, the active checkout `notebook_setup()` records, for a kernel started
     outside the repo. Only the parent of that root is looked at.
 
     A layout whose `nested_dir` names another directory is still returned, with `matches`

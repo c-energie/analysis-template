@@ -16,10 +16,17 @@ overrides an explicit export:
     DOC_REPO=/tmp/scratch pytest tests -q      # beats .env
 
 Loaded once, on import of this package. `notebook_setup()` widens the search by one
-step — the `.env` at the root of the checkout the package is installed from — because a
+step — the `.env` at the root of the active checkout (`active_checkout`) — because a
 notebook kernel started at a workspace root sits *beside* the analysis repo, not inside
 it, and the upward search never reaches its `.env`. That step is an explicit argument
 (`fallback=`), so a plain import keeps exactly the rules above.
+
+The active checkout is the one the working directory is in, and only failing that the one
+the package is installed from. Several analysis repos can be installed editable into one
+venv (a project workspace's), each shipping its own `doc_analysis`; only the first on
+`sys.path` is imported, so "where the package lives" names the same checkout for every
+notebook — and a notebook of the shadowed one silently wrote into the other's document,
+gated by the other's config (issue #24).
 
 Stdlib only: `KEY=value` does not justify a
 dependency, and this file is short enough to read in full.
@@ -37,6 +44,11 @@ ENV_PATH_VAR = "DOC_ENV"
 #: The marker of a checkout root. Without it the package is installed from somewhere
 #: that is not a source tree (a wheel in site-packages), and no `.env` lives there.
 CHECKOUT_MARKER = "pyproject.toml"
+
+#: What an analysis checkout holds besides the marker. A `pyproject.toml` alone also marks
+#: a workspace root, or any other Python project a notebook is opened in; taken for a
+#: checkout, its absent config and `.env` would replace the real checkout's silently.
+CHECKOUT_PACKAGE = Path("src") / "doc_analysis"
 
 #: What the last `load_env` call looked at, for the "DOC_REPO is not set" error: a
 #: missing setting is only fixable once the user knows which files were searched.
@@ -105,6 +117,40 @@ def checkout_root(package_dir=None):
     package_dir = Path(package_dir) if package_dir else Path(__file__).resolve().parent
     root = package_dir.resolve().parents[1]
     return root if (root / CHECKOUT_MARKER).is_file() else None
+
+
+def is_checkout(directory):
+    """Whether `directory` is the root of an analysis checkout made from this template."""
+    directory = Path(directory)
+    return (directory / CHECKOUT_MARKER).is_file() and (directory / CHECKOUT_PACKAGE).is_dir()
+
+
+def cwd_checkout(start=None):
+    """The nearest analysis checkout at or above `start` (default: the cwd), or None."""
+    base = Path(start).resolve() if start else Path.cwd().resolve()
+    return next((directory for directory in (base, *base.parents)
+                 if is_checkout(directory)), None)
+
+
+def active_checkout(start=None, package_dir=None):
+    """The analysis checkout a run belongs to: the cwd's, else the installed one, or None.
+
+    The cwd comes first because it is the only thing that tells two checkouts sharing a
+    venv apart: the imported package is the same for both. The installed checkout
+    (`checkout_root`) is the fallback for a kernel started outside any checkout — a
+    workspace root, the document repo — which is what `notebook_setup()` exists for.
+    """
+    return cwd_checkout(start) or checkout_root(package_dir)
+
+
+def analysis_root():
+    """The directory the tooling's own files hang off, resolved now, not at import.
+
+    `figures_config.toml`, `figures_html/` and the parity baseline belong to the active
+    checkout. With none — a wheel install run outside any checkout — this is where they
+    have always defaulted to, two levels above the package.
+    """
+    return active_checkout() or Path(__file__).resolve().parents[2]
 
 
 def load_env(start=None, override=False, fallback=None, skipped_checkout=None):

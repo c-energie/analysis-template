@@ -8,10 +8,11 @@ what `DOC_REPO` ends up as.
 """
 import os
 import sys
+import warnings
 
 import pytest
 
-from doc_analysis import notebook_setup
+from doc_analysis import env, figure_config, notebook_setup, parity, save_figure
 from doc_analysis.env import load_env
 from doc_analysis.save_figure import document_repo
 
@@ -35,6 +36,10 @@ def workspace(tmp_path, monkeypatch):
     for name in ("DOC_REPO", "DOC_ENV"):
         os.environ.pop(name, None)
     monkeypatch.setattr(sys, "path", list(sys.path))
+    # The search record names the checkout as a fallback for every later document_repo()
+    # call; left behind, it points the rest of the suite at this test's layout.
+    for key in env.LAST_SEARCH:
+        monkeypatch.setitem(env.LAST_SEARCH, key, env.LAST_SEARCH[key])
     monkeypatch.chdir(root)
 
     class Layout:
@@ -124,3 +129,122 @@ def test_a_checkout_without_a_dotenv_names_the_file_it_wanted(workspace):
     with pytest.raises(RuntimeError, match="DOC_REPO is not set") as raised:
         document_repo()
     assert str(workspace.analysis / ".env") in str(raised.value)
+
+
+# --- two analysis checkouts sharing one venv (issue #24) ------------------------------
+
+
+def make_hosted_checkout(workspace_root, document_name, analysis_name):
+    """A document repo hosting its analysis checkout (`writing-hosts-analysis`), no .env."""
+    document = workspace_root / document_name
+    (document / "Sections").mkdir(parents=True)
+    (document / "layout.toml").write_text(
+        f'layout = "writing-hosts-analysis"\nnested_dir = "{analysis_name}"\n',
+        encoding="utf-8")
+    analysis = document / analysis_name
+    (analysis / "src" / "doc_analysis").mkdir(parents=True)
+    (analysis / "notebooks").mkdir()
+    (analysis / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    return analysis, document
+
+
+@pytest.fixture
+def shared_venv(tmp_path, monkeypatch):
+    """Checkouts A and B in one project workspace, the imported doc_analysis being A's.
+
+    The workspace root has a `pyproject.toml` of its own, as a root venv's project does:
+    a directory holding one is not thereby an analysis checkout.
+    """
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[project]\nname = 'ws'\n", encoding="utf-8")
+    a, a_document = make_hosted_checkout(root, "energy-estimation", "energy-analysis")
+    b, b_document = make_hosted_checkout(root, "smeter-validation", "smeter-analysis")
+
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    for name in ("DOC_REPO", "DOC_ENV", figure_config.CONFIG_ENV, save_figure.HTML_DIR_ENV):
+        os.environ.pop(name, None)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    # The search record names the checkout as a fallback for every later document_repo()
+    # call; left behind, it points the rest of the suite at this test's layout.
+    for key in env.LAST_SEARCH:
+        monkeypatch.setitem(env.LAST_SEARCH, key, env.LAST_SEARCH[key])
+    monkeypatch.chdir(root)
+
+    class Layout:
+        pass
+
+    layout = Layout()
+    layout.root, layout.a, layout.b = root, a, b
+    layout.a_document, layout.b_document = a_document, b_document
+    layout.package_dir = a / "src" / "doc_analysis"
+    return layout
+
+
+def setup_recording_warnings(package_dir):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        root = notebook_setup(package_dir=package_dir)
+    return root, [str(w.message) for w in caught]
+
+
+def test_a_shadowed_checkout_writes_into_its_own_document(shared_venv):
+    """The #24 failure: from B's notebooks, with A's doc_analysis imported, setup moved to A
+    and document_repo() named A's document — B's figures landed in the wrong document."""
+    os.chdir(shared_venv.b / "notebooks")
+
+    root, _ = setup_recording_warnings(shared_venv.package_dir)
+
+    assert root == shared_venv.b
+    assert os.getcwd() == str(shared_venv.b)
+    assert str(shared_venv.b / "notebooks") in sys.path
+    assert str(shared_venv.a / "notebooks") not in sys.path
+    assert document_repo() == shared_venv.b_document
+
+
+def test_a_shadowed_checkout_uses_its_own_config_html_dir_and_baseline(shared_venv):
+    """Computed from the imported package's __file__, these gated B's figures by A's
+    config and sent its manifest and baseline into A."""
+    os.chdir(shared_venv.b / "notebooks")
+    setup_recording_warnings(shared_venv.package_dir)
+
+    assert figure_config.config_path() == shared_venv.b / "figures_config.toml"
+    assert save_figure.default_html_dir() == shared_venv.b / "figures_html"
+    assert parity.default_baseline_path() == shared_venv.b / "docs" / "figure_png_baseline.json"
+    # The old constant names still import, and now follow the active checkout too.
+    assert figure_config.DEFAULT_CONFIG_PATH.parent == shared_venv.b
+    assert save_figure.DEFAULT_HTML_DIR.parent == shared_venv.b
+    assert parity.BASELINE_PATH.parents[1] == shared_venv.b
+
+
+def test_a_shadowed_checkout_warns_once_naming_both(shared_venv):
+    """Proceeding is right, but silently running A's code for B's notebooks is not: the
+    two checkouts may carry different versions of the package."""
+    os.chdir(shared_venv.b / "notebooks")
+
+    _, messages = setup_recording_warnings(shared_venv.package_dir)
+
+    assert len(messages) == 1
+    assert str(shared_venv.a) in messages[0] and str(shared_venv.b) in messages[0]
+
+
+def test_outside_every_checkout_the_installed_one_is_used(shared_venv):
+    """A kernel started at the workspace root (#2) is in no checkout — the root's own
+    pyproject.toml does not make it one — so the installed checkout stays the answer."""
+    root, messages = setup_recording_warnings(shared_venv.package_dir)
+
+    assert root == shared_venv.a
+    assert os.getcwd() == str(shared_venv.a)
+    assert document_repo() == shared_venv.a_document
+    assert messages == []
+
+
+def test_inside_the_installed_checkout_nothing_changes(shared_venv):
+    os.chdir(shared_venv.a / "notebooks")
+
+    root, messages = setup_recording_warnings(shared_venv.package_dir)
+
+    assert root == shared_venv.a
+    assert document_repo() == shared_venv.a_document
+    assert figure_config.config_path() == shared_venv.a / "figures_config.toml"
+    assert messages == []

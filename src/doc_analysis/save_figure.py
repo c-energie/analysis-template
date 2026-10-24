@@ -40,7 +40,7 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from doc_analysis.env import LAST_SEARCH, describe_search
+from doc_analysis.env import LAST_SEARCH, analysis_root, describe_search
 from doc_analysis.layout import find_host_layout, find_layout
 
 DOC_REPO_ENV = "DOC_REPO"
@@ -53,8 +53,25 @@ SECTIONS_DIRNAME = "Sections"
 LEGACY_SECTIONS_DIRNAME = "Chapters"
 MANIFEST_NAME = "figures_manifest.json"
 
-# Repo-relative default for the interactive exports (gitignored; see module docstring).
-DEFAULT_HTML_DIR = Path(__file__).resolve().parents[2] / "figures_html"
+HTML_DIRNAME = "figures_html"
+
+
+def default_html_dir():
+    """The active checkout's `figures_html/` (gitignored; see module docstring).
+
+    Resolved per call against the active checkout (`env.analysis_root`), not once from
+    `__file__`: with two checkouts in one venv that sent both repos' manifests and
+    interactive exports into the imported package's checkout.
+    """
+    return analysis_root() / HTML_DIRNAME
+
+
+def __getattr__(name):
+    # The pre-#24 constant, still importable for code that reads it; now resolved on access.
+    if name == "DEFAULT_HTML_DIR":
+        return default_html_dir()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Artifact sub-directories (figures/tables) are save targets, not sections to descend into.
 ARTIFACT_DIRNAMES = (FIGURES_DIRNAME,)
@@ -445,7 +462,7 @@ def _resolve_html_dir(html_dir):
     holds figures_manifest.json — so a matplotlib-only project gets this directory too,
     containing the manifest and nothing else.
     """
-    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or DEFAULT_HTML_DIR)
+    html_dir = Path(html_dir or os.environ.get(HTML_DIR_ENV) or default_html_dir())
     html_dir.mkdir(parents=True, exist_ok=True)
     return html_dir
 
