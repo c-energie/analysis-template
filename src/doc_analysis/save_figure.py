@@ -41,6 +41,7 @@ The HTML directory is nonetheless gitignored until the publishing route is built
 see .gitignore.
 """
 
+import atexit
 import os
 import re
 import shutil
@@ -781,16 +782,17 @@ def _resolve_html_dir(html_dir):
 def _write_static_png(fig, save_path, **write_image_kwargs):
     """Static plotly export via kaleido, with a clear failure when it is missing."""
     try:
-        import kaleido  # noqa: F401
+        import kaleido
     except ImportError as exc:
         raise ImportError(
             "Static PNG export of plotly figures needs the 'kaleido' package, which "
             "the plotly extra installs:\n"
             "    uv sync --extra plotly    (or: uv add kaleido / pip install kaleido)"
         ) from exc
+    _start_kaleido_server(kaleido)
     before = _file_state(save_path)
     try:
-        fig.write_image(str(save_path), **write_image_kwargs)
+        _write_image(fig, save_path, **write_image_kwargs)
     except RuntimeError as exc:
         if not _raised_by_choreographer(exc):
             raise
@@ -807,7 +809,53 @@ def _write_static_png(fig, save_path, **write_image_kwargs):
                 stacklevel=3,
             )
             return
+        _write_image(fig, save_path, **write_image_kwargs)
+
+
+def _write_image(fig, save_path, **write_image_kwargs):
+    """fig.write_image, quiet about the options a running kaleido server already has."""
+    with warnings.catch_warnings():
+        # plotly sends its kaleido options with every call; the server was started with them.
+        warnings.filterwarnings("ignore", message="The kopts argument is ignored if using a server")
         fig.write_image(str(save_path), **write_image_kwargs)
+
+
+_kaleido_server_started = False
+
+
+def _start_kaleido_server(kaleido):
+    """Keep one kaleido browser open for the session, rather than one per figure.
+
+    Without a running server, every write_image starts a headless Chrome and closes it
+    again: seconds a figure, and on Windows the close is what races (issue #22). With
+    one, plotly's write_image goes to it, and later figures take well under a second.
+    A kaleido without a sync server (a test stub, kaleido 0.x) is left alone.
+    """
+    global _kaleido_server_started
+    start = getattr(kaleido, "start_sync_server", None)
+    if _kaleido_server_started or start is None:
+        return
+    start(silence_warnings=True, **_plotly_kaleido_options())
+    atexit.register(_stop_kaleido_server, kaleido)
+    _kaleido_server_started = True
+
+
+def _plotly_kaleido_options():
+    """The options plotly's write_image would give a kaleido of its own, from plotly.io.defaults."""
+    try:
+        from plotly.io import defaults
+    except ImportError:
+        return {}
+    options = {name: getattr(defaults, name, None) for name in ("plotlyjs", "mathjax", "headers")}
+    return {name: value for name, value in options.items() if value}
+
+
+def _stop_kaleido_server(kaleido):
+    """Close the session's kaleido browser at exit; one that will not close dies with the process."""
+    try:
+        kaleido.stop_sync_server(silence_warnings=True)
+    except RuntimeError:
+        pass
 
 
 def _file_state(path):

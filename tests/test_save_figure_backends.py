@@ -184,6 +184,55 @@ def test_missing_kaleido_names_the_extra(document, monkeypatch):
     assert "--extra plotly" in str(excinfo.value)
 
 
+class FakeKaleido:
+    """A kaleido 1.x as far as the saver uses it: a sync server it starts and stops."""
+
+    def __init__(self):
+        self.starts = self.stops = 0
+        self.stop_error = None
+
+    def start_sync_server(self, silence_warnings=False, **options):
+        self.starts += 1
+
+    def stop_sync_server(self, silence_warnings=False):
+        self.stops += 1
+        if self.stop_error:
+            raise self.stop_error
+
+
+@pytest.fixture
+def kaleido_server(monkeypatch):
+    """A FakeKaleido in place of kaleido, a fresh session, and the exit hooks it registers."""
+    from doc_analysis import save_figure
+
+    fake, at_exit = FakeKaleido(), []
+    monkeypatch.setitem(sys.modules, "kaleido", fake)
+    monkeypatch.setattr(save_figure, "_kaleido_server_started", False)
+    monkeypatch.setattr(save_figure.atexit, "register", lambda f, *a: at_exit.append((f, a)))
+    return fake, at_exit
+
+
+def test_one_kaleido_browser_serves_every_save(document, kaleido_server):
+    # One browser per figure is what raced on Windows: Chrome too slow to close (#22).
+    fake, at_exit = kaleido_server
+    save(FakePlotlyFigure(hovertemplate="x"), document, name="first.png")
+    save(FakePlotlyFigure(hovertemplate="x"), document, name="second.png")
+
+    assert fake.starts == 1
+    assert fake.stops == 0
+    assert len(at_exit) == 1
+
+
+def test_a_browser_that_will_not_close_at_exit_is_ignored(document, kaleido_server):
+    fake, at_exit = kaleido_server
+    fake.stop_error = RuntimeError("Couldn't close or kill browser subprocess")
+    save(FakePlotlyFigure(hovertemplate="x"), document)
+
+    stop, args = at_exit[0]
+    stop(*args)
+    assert fake.stops == 1
+
+
 def test_static_scale_reaches_write_image(document, kaleido):
     fig = FakePlotlyFigure(hovertemplate="x")
     save(fig, document, static_scale=3)
